@@ -10,6 +10,13 @@ const blackPiece = '●';
 /** @type {Piece} */
 const whitePiece = '○';
 
+const INITIAL_PIECES = [
+  { row: 3, col: 3, piece: whitePiece },
+  { row: 3, col: 4, piece: blackPiece },
+  { row: 4, col: 3, piece: blackPiece },
+  { row: 4, col: 4, piece: whitePiece }
+];
+
 /**
  * @param {HTMLTableElement} board
  * @param {HTMLElement} turnText
@@ -66,10 +73,12 @@ const createOthello = (board, turnText, btnRestart) => {
       const row = `<tr>${cell.repeat(8)}</tr>`;
       this.board.insertAdjacentHTML('beforeend', row.repeat(8));
 
-      this.board.rows[3].cells[3].textContent = whitePiece;
-      this.board.rows[3].cells[4].textContent = blackPiece;
-      this.board.rows[4].cells[3].textContent = blackPiece;
-      this.board.rows[4].cells[4].textContent = whitePiece;
+      INITIAL_PIECES.forEach((obj) => {
+        const { row, col, piece } = obj;
+        const targetCell = this.getCell(row, col);
+        if (targetCell === undefined) return;
+        this.setPieceInCell(targetCell, piece);
+      });
     },
 
     restart() {
@@ -167,7 +176,7 @@ const createOthello = (board, turnText, btnRestart) => {
      * @param {Piece} pieceToPlace
      * @returns {boolean}
      */
-    hasValidMove(pieceToPlace) {
+    hasValideMove(pieceToPlace) {
       // 盤面全体を走査
       for (let r = 0; r < 8; r++) {
         for (let c = 0; c < 8; c++) {
@@ -218,14 +227,14 @@ const createOthello = (board, turnText, btnRestart) => {
 
       // 次のプレイヤーが石を置ける場所があるか？
       // 1. 置ける場所がある: 通常のプレイフローで続行
-      if (this.hasValidMove(nextPiece)) {
+      if (this.hasValideMove(nextPiece)) {
         this.updateTurnText(nextPiece);
         return;
       }
 
       // 2. 置ける場所がない -> スキップして続行 or ゲーム終了
       // 3. 現在のプレイヤーなら置ける場所がある: スキップして続行
-      if (this.hasValidMove(currentPiece)) {
+      if (this.hasValideMove(currentPiece)) {
         alert(`${this.pieceLabel(nextPiece)}は置ける場所がありません！スキップします。`);
         this.turn++;
         this.updateTurnText(currentPiece);
