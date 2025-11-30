@@ -21,12 +21,15 @@ const INITIAL_PIECES = [
  * @param {HTMLTableElement} board
  * @param {HTMLElement} turnText
  * @param {HTMLElement} btnRestart
+ * @param {Object} [options]
+ * @param {{row: number, col: number, piece: "○" | "●"}[]} [options.initialPieces]
  */
-const createOthello = (board, turnText, btnRestart) => {
+const createOthello = (board, turnText, btnRestart, { initialPieces = INITIAL_PIECES } = {}) => {
   const othello = {
     board,
     turnText,
     btnRestart,
+    initialPieces,
     turn: 0,
 
     /**
@@ -73,7 +76,7 @@ const createOthello = (board, turnText, btnRestart) => {
       const row = `<tr>${cell.repeat(8)}</tr>`;
       this.board.insertAdjacentHTML('beforeend', row.repeat(8));
 
-      INITIAL_PIECES.forEach((obj) => {
+      this.initialPieces.forEach((obj) => {
         const { row, col, piece } = obj;
         const targetCell = this.getCell(row, col);
         if (targetCell === undefined) return;
@@ -172,7 +175,7 @@ const createOthello = (board, turnText, btnRestart) => {
     },
 
     /**
-     * 手番のプレイヤーが石を置けるマスがあるか否かを判別する処理。
+     * 手番のプレイヤーが石を置けるマスがひとつでもあるか否かを判別する処理。
      * @param {Piece} pieceToPlace
      * @returns {boolean}
      */
