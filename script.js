@@ -3,37 +3,122 @@
 // @ts-check
 'use strict';
 
-/** @typedef {'●'|'○'} Piece */
+/** @typedef {'black' | 'white'} Piece */
+/** @typedef {'empty' | Piece} CellState */
 
-/** @type {Piece} */
-const blackPiece = '●';
-/** @type {Piece} */
-const whitePiece = '○';
+/** @typedef {CellState[][]} BoardData */
 
+/**
+ * @type {{row: number, col: number, piece: Piece}[]}
+ */
 const INITIAL_PIECES = [
-  { row: 3, col: 3, piece: whitePiece },
-  { row: 3, col: 4, piece: blackPiece },
-  { row: 4, col: 3, piece: blackPiece },
-  { row: 4, col: 4, piece: whitePiece }
+  { row: 3, col: 3, piece: 'white' },
+  { row: 3, col: 4, piece: 'black' },
+  { row: 4, col: 3, piece: 'black' },
+  { row: 4, col: 4, piece: 'white' }
 ];
+
+/**
+ * 盤面データを管理するコントローラー
+ * 責務: 現在の盤面の状態管理、石の配置、データの複製提供
+ * @param {Object} [options]
+ * @param {{row: number, col: number, piece: 'white' | 'black'}[]} [options.initialPieces]
+ */
+const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
+  /** @type {[] | BoardData} */
+  let boardData = [];
+
+  const init = () => {
+    // 行ごとに新しい配列を作る（参照渡しを防ぐため）
+    boardData = Array.from({ length: 8 }, () => Array(8).fill('empty'));
+
+    initialPieces.forEach((obj) => {
+      const { row, col, piece } = obj;
+      boardData[row][col] = piece;
+    });
+  };
+
+  /**
+   * @param {number} row
+   * @param {number} col
+   * @returns {CellState | undefined}
+   */
+  const getCell = (row, col) => boardData[row][col];
+
+  /**
+   * @param {number} row
+   * @param {number} col
+   * @param {CellState} cellState
+   */
+  const setCell = (row, col, cellState) => {
+    boardData[row][col] = cellState;
+  };
+
+  // 盤面全体のディープコピーを返す（履歴保存用）
+  const clone = () => boardData.map((row) => [...row]);
+
+  // 現在の盤面全体を取得（レンダリング用）
+  const getBoard = () => boardData;
+
+  /**
+   * @param {BoardData} newData
+   */
+  const loadData = (newData) => {
+    boardData = newData.map((row) => [...row]);
+  };
+
+  // 初回実行
+  init();
+  return { init, getCell, setCell, clone, getBoard, loadData };
+};
+
+/**
+ * 履歴を管理するコントローラー
+ * 責務: データの保存、過去データの提供
+ * point: 保存するデータの中身（オセロか将棋か、など）には関心を持たせない
+ */
+const historyController = () => {
+  /** @type {[] | BoardData[]} */
+  let history = [];
+
+  const init = () => {
+    history = [];
+  };
+
+  /**
+   * @param {number} turn
+   * @returns {BoardData | null}
+   */
+  const getData = (turn) => history[turn] || null;
+
+  /**
+   * @param {number} turn
+   * @param {BoardData} data
+   */
+  const pushData = (turn, data) => {
+    if (history.length > turn) {
+      history = history.slice(0, turn);
+    }
+    history[turn] = data;
+  };
+
+  const getLength = () => history.length;
+
+  return { init, getData, pushData, getLength };
+};
+
+// ===== ここまでリファクタリング済み ======
 
 /**
  * @param {HTMLTableElement} board
  * @param {HTMLElement} turnText
- * @param {Object} [options]
- * @param {{row: number, col: number, piece: "○" | "●"}[]} [options.initialPieces]
+ *
  */
-const createOthello = (board, turnText, { initialPieces = INITIAL_PIECES } = {}) => {
+const createOthello = (board, turnText) => {
   // =======================
   // --- 状態管理 (State) ---
   // =======================
   let turn = 0;
-
-  /**
-   * 盤面の状況を文字列で格納する二次元配列。8 * 8 マスのそれぞれが 空('empty'), 黒('black'), 白('white') のいずれの状態であるかを記憶する。
-   * @type {('empty' | 'black' | 'white')[][]}
-   */
-  const boardData = Array.from({ length: 8 }, () => Array(8).fill('empty'));
 
   // =============================
   // --- 盤面操作 (Board Utils) ---
@@ -244,13 +329,6 @@ const createOthello = (board, turnText, { initialPieces = INITIAL_PIECES } = {})
     const cell = '<td></td>';
     const row = `<tr>${cell.repeat(8)}</tr>`;
     board.insertAdjacentHTML('beforeend', row.repeat(8));
-
-    initialPieces.forEach((obj) => {
-      const { row, col, piece } = obj;
-      const targetCell = getCell(row, col);
-      if (targetCell === undefined) return;
-      setPieceInCell(targetCell, piece);
-    });
   };
 
   const restart = () => {
