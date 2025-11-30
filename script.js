@@ -29,6 +29,12 @@ const createOthello = (board, turnText, { initialPieces = INITIAL_PIECES } = {})
   // =======================
   let turn = 0;
 
+  /**
+   * 盤面の状況を文字列で格納する二次元配列。8 * 8 マスのそれぞれが 空('empty'), 黒('black'), 白('white') のいずれの状態であるかを記憶する。
+   * @type {('empty' | 'black' | 'white')[][]}
+   */
+  const boardData = Array.from({ length: 8 }, () => Array(8).fill('empty'));
+
   // =============================
   // --- 盤面操作 (Board Utils) ---
   // =============================
