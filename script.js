@@ -6,7 +6,7 @@
 /** @typedef {'black' | 'white'} Piece */
 /** @typedef {'empty' | Piece} CellState */
 
-/** @typedef {CellState[][]} Board */
+/** @typedef {CellState[][]} BoardData */
 
 /**
  * @type {{row: number, col: number, piece: Piece}[]}
@@ -19,13 +19,20 @@ const INITIAL_PIECES = [
 ];
 
 /**
- * 盤面データを管理するコントローラー
+ * 盤面データを管理するコントローラー (の作成)
  * 責務: 現在の盤面の状態管理、石の配置、データの複製提供
  * @param {Object} [options]
  * @param {{row: number, col: number, piece: 'white' | 'black'}[]} [options.initialPieces]
+ * @returns {{
+ *   init(): void;
+ *   getCell(row: number, col: number): CellState | undefined;
+ *   setCell(row: number, col: number, cellState: CellState): void;
+ *   readonly current: BoardData;
+ *   loadData(newData: BoardData): void;
+ * }} boardDataCon
  */
-const createBoardController = ({ initialPieces = INITIAL_PIECES } = {}) => {
-  /** @type {[] | Board} */
+const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
+  /** @type {[] | BoardData} */
   let board = [];
 
   return {
@@ -58,23 +65,15 @@ const createBoardController = ({ initialPieces = INITIAL_PIECES } = {}) => {
     },
 
     /**
-     * @returns {Board}
+     * @returns {BoardData}
      */
-    // 現在の盤面全体を取得（レンダリング用）
-    getBoard() {
-      return board;
-    },
-
-    /**
-     * @returns {Board}
-     */
-    // 盤面全体のディープコピーを返す（履歴保存用）
-    clone() {
+    // 盤面全体のディープコピーを返す（履歴保存 / レンダリング用）
+    get current() {
       return board.map((row) => [...row]);
     },
 
     /**
-     * @param {Board} newData
+     * @param {BoardData} newData
      */
     loadData(newData) {
       board = newData.map((row) => [...row]);
@@ -83,12 +82,19 @@ const createBoardController = ({ initialPieces = INITIAL_PIECES } = {}) => {
 };
 
 /**
- * 履歴を管理するコントローラー
+ * 履歴を管理するコントローラー (の作成)
  * 責務: データの保存、過去データの提供
  * point: 保存するデータの中身（オセロか将棋か、など）には関心を持たせない
+ *
+ * @returns {{
+ *   init(): void;
+ *   getData(turn: number): BoardData | null;
+ *   pushData(turn: number, data: BoardData): void;
+ *   length: number
+ * }} historyCon
  */
 const historyController = () => {
-  /** @type {[] | Board[]} */
+  /** @type {[] | BoardData[]} */
   let history = [];
 
   return {
@@ -98,14 +104,15 @@ const historyController = () => {
 
     /**
      * @param {number} turn
-     * @returns {Board | null}
-     */ getData(turn) {
+     * @returns {BoardData | null}
+     */
+    getData(turn) {
       return history[turn] || null;
     },
 
     /**
      * @param {number} turn
-     * @param {Board} data
+     * @param {BoardData} data
      */
     pushData(turn, data) {
       if (history.length > turn) {
@@ -114,12 +121,25 @@ const historyController = () => {
       history[turn] = data;
     },
 
-    getLength() {
+    get length() {
       return history.length;
     }
   };
 };
 
+/**
+ * ターンを管理するコントローラー (の作成)
+ * 責務: ターン数の増減、リセット、現在ターン数の提供、
+ * および現在どちらのプレイヤーの手番かを知らせる (改修時は分離すべき)
+ *
+ * @returns {{
+ *   init(): void;
+ *   increment(): void;
+ *   decrement(): void;
+ *   count: number;
+ *   currentPlayer: Piece;
+ * }} turnCon
+ */
 const createTurnController = () => {
   let count = 0;
 
@@ -136,12 +156,75 @@ const createTurnController = () => {
       if (count > 0) count--;
     },
 
-    get() {
+    get count() {
       return count;
     },
 
-    getCurrentPlayer() {
+    get currentPlayer() {
       return count % 2 === 0 ? 'black' : 'white';
+    }
+  };
+};
+
+/**
+ * DOMのレンダー機能を責務とするコントローラー (の作成)
+ * 依存: boardDataCon, turn
+ * @param {{
+ *   init(): void;
+ *   getCell(row: number, col: number): CellState | undefined;
+ *   setCell(row: number, col: number, cellState: CellState): void;
+ *   readonly current: BoardData;
+ *   loadData(newData: BoardData): void;
+ * }} boardDataCon
+ * @param {{
+ *   init(): void;
+ *   increment(): void;
+ *   decrement(): void;
+ *   count: number;
+ *   currentPlayer: Piece;
+ * }} turnCon
+ * @returns {{render(): void}} renderer
+ */
+const createRenderer = (boardDataCon, turnCon) => {
+  /**
+   * @param {BoardData} boardData
+   */
+  const renderBoard = (boardData) => {
+    const table = document.getElementById('board-table');
+    if (table === null || table instanceof HTMLTableElement !== true) return;
+    table.innerHTML = '';
+
+    boardData.forEach((row, r) => {
+      row.forEach((cellState, c) => {
+        const cell = table.rows[r].cells[c].querySelector('.othello__piece');
+        if (cell === null) {
+          console.log('Error: Cannot render null cell!');
+          return;
+        }
+
+        cell.className = 'othello__piece ' + cellState;
+      });
+    });
+  }; // --- renderBoard
+
+  /**
+   * @param {number} turn
+   * @param {Piece} currentPlayer
+   */
+  const renderInfo = (turn, currentPlayer) => {
+    const turnText = document.getElementById('turn-text');
+    if (turnText === null) return;
+    turnText.textContent = `Turn: ${turn} | Player: ${currentPlayer}`;
+  }; // --- renderInfo
+
+  return {
+    render() {
+      const currentBoardData = boardDataCon.current;
+      const turn = turnCon.count;
+      const currentPlayer = turnCon.currentPlayer;
+
+      renderBoard(currentBoardData);
+      renderInfo(turn, currentPlayer);
     }
   };
 };

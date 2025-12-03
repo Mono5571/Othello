@@ -13,18 +13,22 @@
         cursor: pointer;
       }
 
-      .othello__piece.piece--black {
+      .othello__piece.empty {
+        color: transparent;
+      }
+
+      .othello__piece.black {
         color: #111;
       }
 
-      .othello__piece.piece--white {
+      .othello__piece.white {
         color: #fff;
       }
     </style>
     <script src="script.js" defer></script>
   </head>
   <body>
-    <table id="board"></table>
+    <table id="board-table"></table>
     <p id="turn-text">黒の手番です</p>
     <button type="button" id="btn-restart">リスタート</button>
   </body>
