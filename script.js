@@ -183,22 +183,32 @@ const createTurnController = () => {
  *   count: number;
  *   currentPlayer: Piece;
  * }} turnCon
- * @returns {{render(): void}} renderer
+ * @returns {{render(): void} | undefined} renderer
  */
 const createRenderer = (boardDataCon, turnCon) => {
+  const table = document.getElementById('board-table');
+  if (table === null || table instanceof HTMLTableElement !== true) {
+    console.log('Error: Not found table on creating renderer!');
+    return;
+  }
+
+  const turnText = document.getElementById('turn-text');
+  if (turnText === null) {
+    console.log('Error: Not found turnText on creating renderer!');
+    return;
+  }
+
   /**
    * @param {BoardData} boardData
    */
   const renderBoard = (boardData) => {
-    const table = document.getElementById('board-table');
-    if (table === null || table instanceof HTMLTableElement !== true) return;
     table.innerHTML = '';
 
     boardData.forEach((row, r) => {
       row.forEach((cellState, c) => {
         const cell = table.rows[r].cells[c].querySelector('.othello__piece');
         if (cell === null) {
-          console.log('Error: Cannot render null cell!');
+          console.log('Error: Not found cell to render on rendering board!');
           return;
         }
 
@@ -212,8 +222,6 @@ const createRenderer = (boardDataCon, turnCon) => {
    * @param {Piece} currentPlayer
    */
   const renderInfo = (turn, currentPlayer) => {
-    const turnText = document.getElementById('turn-text');
-    if (turnText === null) return;
     turnText.textContent = `Turn: ${turn} | Player: ${currentPlayer}`;
   }; // --- renderInfo
 
