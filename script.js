@@ -306,7 +306,6 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCon, renderer }
 
     // 2. 盤上にあり、かつ終端が自分の石であれば、候補の配列を返す
     if (isOnBoard({ r, c }) && boardDataCon.getCell({ r, c }) === pieceToPlace) {
-      console.log(candidatesInDir);
       return candidatesInDir;
     }
 
@@ -346,7 +345,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCon, renderer }
 
     console.log(cellsToFlip); // -> 何かがおかしい
 
-    boardDataCon.flipCells(cellsToFlip, currentPlayer); // fail
+    boardDataCon.flipCells(cellsToFlip, currentPlayer); // success
 
     boardDataCon.setCell({ r, c }, currentPlayer); // success
 
