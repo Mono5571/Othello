@@ -1,2 +1,5 @@
 # .txtをステージングに追加しない
 *.txt
+
+# script_old.jsをステージングに追加しない
+script_old.js
