@@ -7,7 +7,8 @@
       td {
         width: 60px;
         height: 60px;
-        background-color: #ddd;
+        background-color: rgb(139, 221, 139);
+        background-color: oklch(80.735% 0.14838 142.189);
         text-align: center;
         font-size: 2.6rem;
         cursor: pointer;
@@ -18,7 +19,7 @@
       }
 
       .othello__piece.black {
-        color: #111;
+        color: #333;
       }
 
       .othello__piece.white {
@@ -30,6 +31,6 @@
   <body>
     <table id="board-table"></table>
     <p id="turn-text">黒の手番です</p>
-    <button type="button" id="btn-restart">リスタート</button>
+    <button type="button" id="restart-button">リスタート</button>
   </body>
 </html>

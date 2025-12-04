@@ -28,7 +28,8 @@ const INITIAL_PIECES = [
  *   flipCells(cellsToFlip: Coordinate[], piece: Piece): void;
  *   readonly current: BoardData;
  *   loadData(newData: BoardData): void;
- * }} boardDataCon
+ *   score: { b: number, w: number }
+ * }} BoardDataCon
  */
 
 /**
@@ -36,7 +37,7 @@ const INITIAL_PIECES = [
  * 責務: 現在の盤面の状態管理、石の配置、データの複製提供
  * @param {Object} [options]
  * @param {{coordinate: Coordinate, piece: Piece}[]} [options.initialPieces]
- * @returns {boardDataCon}
+ * @returns {BoardDataCon}
  */
 const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
   /** @type {BoardData} */
@@ -65,8 +66,8 @@ const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
     },
 
     flipCells(cellsToFlip, piece) {
-      cellsToFlip.forEach((coordinate) => {
-        boardData[coordinate.r][coordinate.c] = piece;
+      cellsToFlip.forEach(({ r, c }) => {
+        boardData[r][c] = piece;
       });
     },
 
@@ -77,6 +78,17 @@ const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
 
     loadData(newData) {
       boardData = newData.map((row) => [...row]);
+    },
+
+    get score() {
+      return this.current.flat().reduce(
+        (acc, cur) => {
+          if (cur === 'black') acc.b++;
+          if (cur === 'white') acc.w++;
+          return acc;
+        },
+        { b: 0, w: 0 }
+      );
     }
   };
 };
@@ -87,7 +99,7 @@ const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
  *   getData(turn: number): BoardData | null;
  *   pushData(turn: number, data: BoardData): void;
  *   length: number
- * }} historyCon
+ * }} HistoryCon
  */
 
 /**
@@ -95,7 +107,7 @@ const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
  * 責務: データの保存、過去データの提供
  * point: 保存するデータの中身（オセロか将棋か、など）には関心を持たせない
  *
- * @returns {historyCon}
+ * @returns {HistoryCon}
  */
 const createHistoryController = () => {
   /** @type {BoardData[]} */
@@ -128,9 +140,9 @@ const createHistoryController = () => {
  *   init(): void;
  *   increment(): void;
  *   decrement(): void;
- *   count: number;
- *   currentPlayer: Piece;
- * }} turnCon
+ *   current: number;
+ *   player: Piece;
+ * }} TurnCounter
  */
 
 /**
@@ -138,9 +150,9 @@ const createHistoryController = () => {
  * 責務: ターン数の増減、リセット、現在ターン数の提供、
  * および現在どちらのプレイヤーの手番かを知らせる (改修時は分離すべき)
  *
- * @returns {turnCon}
+ * @returns {TurnCounter}
  */
-const createTurnController = () => {
+const createTurnCounter = () => {
   let count = 0;
 
   return {
@@ -156,11 +168,11 @@ const createTurnController = () => {
       if (count > 0) count--;
     },
 
-    get count() {
+    get current() {
       return count;
     },
 
-    get currentPlayer() {
+    get player() {
       return count % 2 === 0 ? 'black' : 'white';
     }
   };
@@ -170,11 +182,11 @@ const createTurnController = () => {
  * DOMのレンダリングをおこなうコントローラー (の作成)
  * 責務: 初回のDOM取得と構築及びキャッシュをおこない、Model (= Single Source of Truth たる boardData) から View の生成をする
  * 依存: boardDataCon, turn
- * @param {boardDataCon} boardDataCon
- * @param {turnCon} turnCon
+ * @param {BoardDataCon} boardDataCon
+ * @param {TurnCounter} turnCounter
  * @returns {{render(): void} | undefined} renderer
  */
-const createRenderer = (boardDataCon, turnCon) => {
+const createRenderer = (boardDataCon, turnCounter) => {
   const table = document.getElementById('board-table');
   if (table === null || table instanceof HTMLTableElement !== true) {
     console.log('Error: Not found table on creating renderer!');
@@ -242,8 +254,8 @@ const createRenderer = (boardDataCon, turnCon) => {
   return {
     render() {
       const currentBoardData = boardDataCon.current;
-      const turn = turnCon.count + 1;
-      const currentPlayer = turnCon.currentPlayer;
+      const turn = turnCounter.current + 1;
+      const currentPlayer = turnCounter.player;
 
       renderBoard(currentBoardData);
       renderInfo(turn, currentPlayer);
@@ -252,19 +264,19 @@ const createRenderer = (boardDataCon, turnCon) => {
 };
 
 /**
- * オセロのゲーム進行を管理するコントローラー (の作成)
- * 責務:
- * 1) 依存している各種コントローラーをもちいたゲームの進行
- * 2) イベントリスナーをDOM要素に設置してプレイヤーへの操作インターフェイスを提供
- * 依存: boardDataCon, historyCon, turnCon, renderer
- * @param {object} arguments
- * @param {boardDataCon} arguments.boardDataCon
- * @param {historyCon} arguments.historyCon
- * @param {turnCon} arguments.turnCon
- * @param {{render(): void | undefined}} arguments.renderer
- * @returns {{initGame(): void | undefined}} othelloCon
+ * @typedef {{
+ *   getFlipCandidates(coordinate: Coordinate, pieceToPlace: Piece): null | Coordinate[];
+ *   getValidMoves(pieceToPlace: Piece): Coordinate[]
+ * }} MoveRules
  */
-const createOthelloController = ({ boardDataCon, historyCon, turnCon, renderer }) => {
+/**
+ * オセロのコアロジックをつかさどるオブジェクト（の生成）
+ * 責務: 石を挟んで裏返すというオセロのゲームルールの計算
+ * 依存: boardDataCon -> 盤面の状態を参照するため
+ * @param {BoardDataCon} boardDataCon
+ * @returns {MoveRules}
+ */
+const createMoveRules = (boardDataCon) => {
   /** 探査すべき 8 方向 */
   const DIRECTIONS = [
     { dr: -1, dc: -1 },
@@ -293,100 +305,211 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCon, renderer }
    */
   const checkDirection = (startCoord, pieceToPlace, { dr, dc }) => {
     const opponentPiece = pieceToPlace === 'black' ? 'white' : 'black';
+    /** @type {Coordinate[]} */
     const candidatesInDir = [];
-    let r = startCoord.r + dr;
-    let c = startCoord.c + dc;
 
-    // 1. 相手の石が連続しているかチェックして候補に
-    while (isOnBoard({ r, c }) && boardDataCon.getCell({ r, c }) === opponentPiece) {
-      candidatesInDir.push({ r, c });
-      r += dr;
-      c += dc;
+    for (let dist = 1, loop = true; loop === true; dist++) {
+      const row = startCoord.r + dr * dist;
+      const col = startCoord.c + dc * dist;
+      const checkingCell = { r: row, c: col };
+
+      // 盤外に出たら走査中断
+      if (!isOnBoard(checkingCell)) break;
+
+      const checkingCellState = boardDataCon.getCell(checkingCell);
+
+      if (checkingCellState === opponentPiece) {
+        // 1. 相手の石が連続しているかチェックして候補の配列にいれ、次のループへ
+        candidatesInDir.push(checkingCell);
+      } else if (checkingCellState === pieceToPlace) {
+        // 2. 盤上にあり、かつ終端が自分の石であれば、候補の配列 (要素数 0 以上) を返す
+        return candidatesInDir;
+      } else {
+        // 3. 空のマスが見つかったら裏返し不成立
+        break;
+      }
     }
 
-    // 2. 盤上にあり、かつ終端が自分の石であれば、候補の配列を返す
-    if (isOnBoard({ r, c }) && boardDataCon.getCell({ r, c }) === pieceToPlace) {
-      return candidatesInDir;
-    }
-
-    // 3. 終端が盤外か空の場合、裏返しは不成立、空の配列を返す
+    // break をここでキャッチ
     return [];
   };
 
-  /**
-   * 指定された座標に対して、そこに指定された色の石を置いたときに裏返す石の座標群を配列の形で返す関数
-   * @param {Coordinate} coordinate
-   * @param {Piece} pieceToPlace
-   * @returns {null | Coordinate[]}
-   */
-  const getFlipCandidates = ({ r, c }, pieceToPlace) => {
-    if (boardDataCon.getCell({ r, c }) !== 'empty') return null;
-    /** @type {Coordinate[]} */
-    const allCandidates = [];
-    DIRECTIONS.forEach((direction) => {
-      const candidatesInDir = checkDirection({ r, c }, pieceToPlace, direction);
-      allCandidates.push(...candidatesInDir);
-    });
-    if (allCandidates.length === 0) return null;
-    return allCandidates;
-  };
+  return {
+    /**
+     * 指定された座標に対して、ある色の石を置いたときに裏返せる石の座標群を配列の形で返す関数
+     * 裏返せる石がない場合は null を返す
+     * @param {Coordinate} coordinate
+     * @param {Piece} pieceToPlace
+     * @returns {null | Coordinate[]}
+     */
+    getFlipCandidates({ r, c }, pieceToPlace) {
+      if (boardDataCon.getCell({ r, c }) !== 'empty') return null;
+      /** @type {Coordinate[]} */
+      const allCandidates = [];
+      DIRECTIONS.forEach((direction) => {
+        const candidatesInDir = checkDirection({ r, c }, pieceToPlace, direction);
+        allCandidates.push(...candidatesInDir);
+      });
+      if (allCandidates.length === 0) return null;
+      return allCandidates;
+    },
 
+    getValidMoves(pieceToPlace) {
+      const allCoords = Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (_, c) => ({ r, c }))).flat();
+      // [{ r: 0, c: 0 }, { r: 0, c: 1 }, ..., { r: 7, c: 7 }]
+      const validMoves = allCoords.filter((coords) => this.getFlipCandidates(coords, pieceToPlace));
+      return validMoves;
+    }
+  };
+};
+
+/**
+ * オセロのゲーム進行を管理するコントローラー (の作成)
+ * 責務:
+ * 1) 依存している各種コントローラーをもちいたゲームの進行
+ * 2) イベントリスナーをDOM要素に設置してプレイヤーへの操作インターフェイスを提供
+ * 依存: boardDataCon, historyCon, turnCounter, renderer, moveRules
+ * @param {object} arguments
+ * @param {BoardDataCon} arguments.boardDataCon
+ * @param {HistoryCon} arguments.historyCon
+ * @param {TurnCounter} arguments.turnCounter
+ * @param {{render(): void}} arguments.renderer
+ * @param {MoveRules} arguments.moveRules
+ * @returns {{
+ *   initGame(): void,
+ *   setupEventListeners(): void
+ * }} othelloCon
+ */
+const createOthelloController = ({ boardDataCon, historyCon, turnCounter, renderer, moveRules }) => {
   /**
    *
    * @param {Coordinate} clickedCoord
    */
   const handleCellClick = ({ r, c }) => {
-    const currentPlayer = turnCon.currentPlayer;
-    const cellsToFlip = getFlipCandidates({ r, c }, currentPlayer);
+    const currentPlayer = turnCounter.player;
+    const cellsToFlip = moveRules.getFlipCandidates({ r, c }, currentPlayer);
     if (cellsToFlip === null) {
       console.log('Error: Invalid move!');
       return;
     }
 
-    console.log(cellsToFlip); // -> 何かがおかしい
+    boardDataCon.flipCells(cellsToFlip, currentPlayer);
+    boardDataCon.setCell({ r, c }, currentPlayer);
 
-    boardDataCon.flipCells(cellsToFlip, currentPlayer); // success
-
-    boardDataCon.setCell({ r, c }, currentPlayer); // success
-
-    // test ---
-
-    turnCon.increment(); // success
-    historyCon.pushData(turnCon.count, boardDataCon.current); // ?
-    renderer.render(); // // success?
-    // --- test
+    manageTurnProgression();
   };
 
-  const setupEventListeners = () => {
-    const table = document.getElementById('board-table');
-    if (!table) {
-      console.log('Error: Not found table on setting up event listeners');
+  /**
+   * 現在の盤面状態を基に、次のターンの状態遷移を管理する。
+   * 責務: ターンインクリメント、履歴保存、パス/終了判定、レンダリング。
+   */
+  const manageTurnProgression = () => {
+    const currentTurn = turnCounter.current + 1; // 石を置いた後の仮想的な次のターン
+
+    // 1. 履歴の保存 (次のターン数で保存)
+    historyCon.pushData(currentTurn, boardDataCon.current);
+
+    // 2. 次のプレイヤーを判定
+    const nextPlayer = currentTurn % 2 === 0 ? 'black' : 'white';
+    const validMovesNextPL = moveRules.getValidMoves(nextPlayer);
+
+    // --- 状態遷移の判定ロジック ---
+
+    // --- unDo, reDo の挙動がうまくいかない場合、この辺が原因の可能性あり ---
+    if (validMovesNextPL.length === 0) {
+      // 次のプレイヤーはパスの可能性がある
+
+      const currentPlayer = currentTurn % 2 === 0 ? 'white' : 'black'; // プレイヤーを戻して再チェック
+      const validMovesCurrentPL = moveRules.getValidMoves(currentPlayer);
+
+      if (validMovesCurrentPL.length === 0) {
+        // 両者置けない -> ゲーム終了
+        turnCounter.increment(); // 最終的なターンを記録
+        historyCon.pushData(turnCounter.current, boardDataCon.current);
+        endGame();
+        return;
+      }
+
+      // 次のプレイヤーはパス -> スキップ処理
+      historyCon.pushData(turnCounter.current, boardDataCon.current); // 履歴は更新
+      skip(nextPlayer);
+      renderer.render(); // スキップ表示の更新
       return;
     }
 
-    table.addEventListener('click', (e) => {
-      // @ts-ignore
-      const td = e.target?.closest('td');
-      if (!td) return;
+    // 3. 通常のターン進行
+    turnCounter.increment(); // 内部ターンカウントを進める
+    renderer.render();
+  };
 
-      const r = td.parentElement.rowIndex;
-      const c = td.cellIndex;
+  /**
+   *
+   * @param {Piece} player
+   */
+  const skip = (player) => {
+    alert(`Player ${player} has no valid move. Skipped ${player}'s turn.`);
+  };
 
-      handleCellClick({ r, c });
-    });
+  const endGame = () => {
+    renderer.render();
+    alert('Game Over!');
+
+    // 点数計算は boardDataCon の責務であるべき
+    const { b, w } = boardDataCon.score;
+
+    const turnText = document.getElementById('turn-text');
+    if (turnText === null) {
+      console.log('Error: Not found turn text on ending game!');
+      return;
+    }
+
+    // DOM操作は renderer の責務であるべき
+    // e.g renderer.showResult();
+    const appendix = b === w ? 'Draw!' : b > w ? 'Winner: black!' : 'Winner: White!';
+    const msg = `Turn: ${turnCounter.current + 1}, black: ${b}, white: ${w} ` + `${appendix}`;
+
+    turnText.textContent = msg;
   };
 
   return {
     initGame() {
       boardDataCon.init();
       historyCon.init();
-      turnCon.init();
+      turnCounter.init();
 
       // 初期状態を履歴配列の0番目に保存
-      historyCon.pushData(turnCon.count, boardDataCon.current);
+      historyCon.pushData(turnCounter.current, boardDataCon.current);
 
       renderer.render();
-      setupEventListeners();
+    },
+
+    setupEventListeners() {
+      const table = document.getElementById('board-table');
+      if (table === null) {
+        console.log('Error: Not found table on setting up event listeners');
+        return;
+      }
+
+      const restartButton = document.getElementById('restart-button');
+      if (restartButton === null) {
+        console.log('Error: Not found restart button on setting up event listeners');
+        return;
+      }
+
+      // undoButton, redoButton の追加
+
+      table.addEventListener('click', (e) => {
+        // @ts-ignore
+        const td = e.target?.closest('td');
+        if (!td) return;
+
+        const r = td.parentElement.rowIndex;
+        const c = td.cellIndex;
+
+        handleCellClick({ r, c });
+      });
+
+      restartButton.addEventListener('click', () => this.initGame());
     }
   };
 };
@@ -394,17 +517,20 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCon, renderer }
 document.addEventListener('DOMContentLoaded', () => {
   const boardDataCon = createBoardDataController();
   const historyCon = createHistoryController();
-  const turnCon = createTurnController();
+  const turnCounter = createTurnCounter();
 
   // DI (Dependency Injection 依存性の注入) して使う
-  const renderer = createRenderer(boardDataCon, turnCon);
+  const renderer = createRenderer(boardDataCon, turnCounter);
   if (renderer === undefined) {
     console.log('Error: Failed to create renderer!');
     return;
   }
 
+  const moveRules = createMoveRules(boardDataCon);
+
   // DI (Dependency Injection 依存性の注入) して使う
-  const othelloCon = createOthelloController({ boardDataCon, historyCon, turnCon, renderer });
+  const othelloCon = createOthelloController({ boardDataCon, historyCon, turnCounter, renderer, moveRules });
 
   othelloCon.initGame();
+  othelloCon.setupEventListeners();
 });
