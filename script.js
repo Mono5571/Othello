@@ -222,7 +222,7 @@ const createPlayerManager = ({ playerOrder = ['black', 'white'] } = {}) => {
  * @param {BoardDataCon} boardDataCon
  * @param {TurnCounter} turnCounter
  * @param {PlayerM} playerM
- * @returns {{render(): void} | undefined} renderer
+ * @returns {{render(): void, renderSkip(player: Piece): void, renderResult(): void} | undefined} renderer
  */
 const createRenderer = (boardDataCon, turnCounter, playerM) => {
   const table = document.getElementById('board-table');
@@ -298,6 +298,26 @@ const createRenderer = (boardDataCon, turnCounter, playerM) => {
 
       renderBoard(currentBoardData);
       renderInfo(turnOnText, currentPlayer);
+    },
+
+    /**
+     *
+     * @param {Piece} player
+     */
+    renderSkip(player) {
+      alert(`Player ${player} has no valid move. Skipped ${player}'s turn.`);
+    },
+
+    renderResult() {
+      alert('Game Over!');
+
+      // 点数計算は boardDataCon の責務であるべき
+      const { b, w } = boardDataCon.score;
+
+      const appendix = b === w ? 'Draw!' : b > w ? 'Winner: black!' : 'Winner: White!';
+      const msg = `Turn: ${turnCounter.current + 1}, black: ${b}, white: ${w} ` + `${appendix}`;
+
+      turnText.textContent = msg;
     }
   };
 };
@@ -412,7 +432,7 @@ const createMoveRules = (boardDataCon) => {
  * @param {BoardDataCon} arguments.boardDataCon
  * @param {HistoryCon} arguments.historyCon
  * @param {TurnCounter} arguments.turnCounter
- * @param {{render(): void}} arguments.renderer
+ * @param {{render(): void, renderSkip(player: Piece): void, renderResult(): void}} arguments.renderer
  * @param {MoveRules} arguments.moveRules
  * @param {PlayerM} arguments.playerM
  * @returns {{
@@ -446,7 +466,6 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
   const manageTurnProgression = () => {
     const nextTurn = turnCounter.current + 1;
     historyCon.pushData(nextTurn, boardDataCon.current);
-    console.log(turnCounter.current);
 
     // 次のプレイヤーを判定
     const nextPlayer = playerM.getTurnPL(nextTurn);
@@ -464,49 +483,18 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       if (validMovesCurrentPL.length === 0) {
         // 両者置けない -> ゲーム終了
         renderer.render();
-        endGame();
+        renderer.renderResult();
         return;
       }
 
       // 次のプレイヤーはパス -> スキップ処理
-      turnCounter.increment();
-      skip(nextPlayer);
-      return;
+      playerM.skip();
+      renderer.renderSkip(nextPlayer);
     }
 
     // 3. 通常のターン進行
     turnCounter.increment();
     renderer.render();
-  };
-
-  /**
-   *
-   * @param {Piece} player
-   */
-  const skip = (player) => {
-    alert(`Player ${player} has no valid move. Skipped ${player}'s turn.`);
-    playerM.skip();
-    renderer.render(); // スキップ表示の更新
-  };
-
-  const endGame = () => {
-    alert('Game Over!');
-
-    // 点数計算は boardDataCon の責務であるべき
-    const { b, w } = boardDataCon.score;
-
-    const turnText = document.getElementById('turn-text');
-    if (turnText === null) {
-      console.log('Error: Not found turn text on ending game!');
-      return;
-    }
-
-    // DOM操作は renderer の責務であるべき -> 改善ポイント
-    // e.g renderer.showResult();
-    const appendix = b === w ? 'Draw!' : b > w ? 'Winner: black!' : 'Winner: White!';
-    const msg = `Turn: ${turnCounter.current + 1}, black: ${b}, white: ${w} ` + `${appendix}`;
-
-    turnText.textContent = msg;
   };
 
   return {
