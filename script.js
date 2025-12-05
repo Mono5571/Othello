@@ -148,7 +148,7 @@ const createHistoryController = () => {
 /**
  * ターンを管理するコントローラー (の作成)
  * 責務: ターン数の増減、リセット、現在ターン数の提供、
- * および現在どちらのプレイヤーの手番かを知らせる (改修時は分離すべき)
+ * および現在どちらのプレイヤーの手番かを知らせる (改修時は分離すべき？)
  *
  * @returns {TurnCounter}
  */
@@ -179,14 +179,52 @@ const createTurnCounter = () => {
 };
 
 /**
+ * @typedef {{
+ *   resetSkip(): void,
+ *   skip(): void,
+ *   getTurnPL(turn: number): Piece
+ * }} PlayerM
+ */
+/**
+ * ターンカウントに基づき、スキップ回数を考慮したそのターンのプレイヤーを決定するモジュール
+ * @param {object} options
+ * @param {Piece[]} [options.playerOrder]
+ * @returns {PlayerM}
+ */
+const createPlayerManager = ({ playerOrder = ['black', 'white'] } = {}) => {
+  let skipCount = 0;
+
+  return {
+    resetSkip() {
+      skipCount = 0;
+    },
+
+    skip() {
+      skipCount++;
+    },
+
+    /**
+     *
+     * @param {number} turn
+     * @returns {Piece}
+     */
+    getTurnPL(turn) {
+      const index = (turn + skipCount) % playerOrder.length;
+      return playerOrder[index];
+    }
+  };
+};
+
+/**
  * DOMのレンダリングをおこなうコントローラー (の作成)
  * 責務: 初回のDOM取得と構築及びキャッシュをおこない、Model (= Single Source of Truth たる boardData) から View の生成をする
  * 依存: boardDataCon, turn
  * @param {BoardDataCon} boardDataCon
  * @param {TurnCounter} turnCounter
+ * @param {PlayerM} playerM
  * @returns {{render(): void} | undefined} renderer
  */
-const createRenderer = (boardDataCon, turnCounter) => {
+const createRenderer = (boardDataCon, turnCounter, playerM) => {
   const table = document.getElementById('board-table');
   if (table === null || table instanceof HTMLTableElement !== true) {
     console.log('Error: Not found table on creating renderer!');
@@ -254,11 +292,12 @@ const createRenderer = (boardDataCon, turnCounter) => {
   return {
     render() {
       const currentBoardData = boardDataCon.current;
-      const turn = turnCounter.current + 1;
-      const currentPlayer = turnCounter.player;
+      const currentTurn = turnCounter.current;
+      const turnOnText = currentTurn + 1;
+      const currentPlayer = playerM.getTurnPL(currentTurn);
 
       renderBoard(currentBoardData);
-      renderInfo(turn, currentPlayer);
+      renderInfo(turnOnText, currentPlayer);
     }
   };
 };
@@ -375,18 +414,19 @@ const createMoveRules = (boardDataCon) => {
  * @param {TurnCounter} arguments.turnCounter
  * @param {{render(): void}} arguments.renderer
  * @param {MoveRules} arguments.moveRules
+ * @param {PlayerM} arguments.playerM
  * @returns {{
  *   initGame(): void,
  *   setupEventListeners(): void
  * }} othelloCon
  */
-const createOthelloController = ({ boardDataCon, historyCon, turnCounter, renderer, moveRules }) => {
+const createOthelloController = ({ boardDataCon, historyCon, turnCounter, renderer, moveRules, playerM }) => {
   /**
    *
    * @param {Coordinate} clickedCoord
    */
   const handleCellClick = ({ r, c }) => {
-    const currentPlayer = turnCounter.player;
+    const currentPlayer = playerM.getTurnPL(turnCounter.current);
     const cellsToFlip = moveRules.getFlipCandidates({ r, c }, currentPlayer);
     if (cellsToFlip === null) {
       console.log('Error: Invalid move!');
@@ -404,13 +444,12 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
    * 責務: ターンインクリメント、履歴保存、パス/終了判定、レンダリング。
    */
   const manageTurnProgression = () => {
-    const currentTurn = turnCounter.current + 1; // 石を置いた後の仮想的な次のターン
+    const nextTurn = turnCounter.current + 1;
+    historyCon.pushData(nextTurn, boardDataCon.current);
+    console.log(turnCounter.current);
 
-    // 1. 履歴の保存 (次のターン数で保存)
-    historyCon.pushData(currentTurn, boardDataCon.current);
-
-    // 2. 次のプレイヤーを判定
-    const nextPlayer = currentTurn % 2 === 0 ? 'black' : 'white';
+    // 次のプレイヤーを判定
+    const nextPlayer = playerM.getTurnPL(nextTurn);
     const validMovesNextPL = moveRules.getValidMoves(nextPlayer);
 
     // --- 状態遷移の判定ロジック ---
@@ -419,26 +458,24 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     if (validMovesNextPL.length === 0) {
       // 次のプレイヤーはパスの可能性がある
 
-      const currentPlayer = currentTurn % 2 === 0 ? 'white' : 'black'; // プレイヤーを戻して再チェック
-      const validMovesCurrentPL = moveRules.getValidMoves(currentPlayer);
+      const secondNextPlayer = playerM.getTurnPL(nextTurn + 1); // プレイヤーを戻して再チェック
+      const validMovesCurrentPL = moveRules.getValidMoves(secondNextPlayer);
 
       if (validMovesCurrentPL.length === 0) {
         // 両者置けない -> ゲーム終了
-        turnCounter.increment(); // 最終的なターンを記録
-        historyCon.pushData(turnCounter.current, boardDataCon.current);
+        renderer.render();
         endGame();
         return;
       }
 
       // 次のプレイヤーはパス -> スキップ処理
-      historyCon.pushData(turnCounter.current, boardDataCon.current); // 履歴は更新
+      turnCounter.increment();
       skip(nextPlayer);
-      renderer.render(); // スキップ表示の更新
       return;
     }
 
     // 3. 通常のターン進行
-    turnCounter.increment(); // 内部ターンカウントを進める
+    turnCounter.increment();
     renderer.render();
   };
 
@@ -448,10 +485,11 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
    */
   const skip = (player) => {
     alert(`Player ${player} has no valid move. Skipped ${player}'s turn.`);
+    playerM.skip();
+    renderer.render(); // スキップ表示の更新
   };
 
   const endGame = () => {
-    renderer.render();
     alert('Game Over!');
 
     // 点数計算は boardDataCon の責務であるべき
@@ -463,7 +501,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       return;
     }
 
-    // DOM操作は renderer の責務であるべき
+    // DOM操作は renderer の責務であるべき -> 改善ポイント
     // e.g renderer.showResult();
     const appendix = b === w ? 'Draw!' : b > w ? 'Winner: black!' : 'Winner: White!';
     const msg = `Turn: ${turnCounter.current + 1}, black: ${b}, white: ${w} ` + `${appendix}`;
@@ -476,6 +514,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       boardDataCon.init();
       historyCon.init();
       turnCounter.init();
+      playerM.resetSkip();
 
       // 初期状態を履歴配列の0番目に保存
       historyCon.pushData(turnCounter.current, boardDataCon.current);
@@ -496,7 +535,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
         return;
       }
 
-      // undoButton, redoButton の追加
+      // undoButton, redoButton へのイベントリスナーの追加
 
       table.addEventListener('click', (e) => {
         // @ts-ignore
@@ -518,18 +557,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const boardDataCon = createBoardDataController();
   const historyCon = createHistoryController();
   const turnCounter = createTurnCounter();
+  const playerM = createPlayerManager();
 
   // DI (Dependency Injection 依存性の注入) して使う
-  const renderer = createRenderer(boardDataCon, turnCounter);
+  const renderer = createRenderer(boardDataCon, turnCounter, playerM);
   if (renderer === undefined) {
     console.log('Error: Failed to create renderer!');
     return;
   }
 
+  // DI (Dependency Injection 依存性の注入) して使う
   const moveRules = createMoveRules(boardDataCon);
 
   // DI (Dependency Injection 依存性の注入) して使う
-  const othelloCon = createOthelloController({ boardDataCon, historyCon, turnCounter, renderer, moveRules });
+  const othelloCon = createOthelloController({ boardDataCon, historyCon, turnCounter, renderer, moveRules, playerM });
 
   othelloCon.initGame();
   othelloCon.setupEventListeners();
