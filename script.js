@@ -7,6 +7,7 @@
 /** @typedef {'empty' | Piece} CellState */
 
 /** @typedef {CellState[][]} BoardData */
+/** @typedef {{ player: Piece, boardData: BoardData }} PlayerAndBoardData */
 
 /** @typedef {{r: number, c: number}} Coordinate */
 
@@ -97,8 +98,8 @@ const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
  * @typedef {{
  *   init(): void;
  *   isData(turn: number): boolean;
- *   getData(turn: number): BoardData | null;
- *   pushData(turn: number, data: BoardData): void;
+ *   getData(turn: number): PlayerAndBoardData | null;
+ *   pushData(turn: number, player: Piece, boarddata: BoardData): void;
  *   length: number
  * }} HistoryCon
  */
@@ -111,7 +112,7 @@ const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
  * @returns {HistoryCon}
  */
 const createHistoryController = () => {
-  /** @type {BoardData[]} */
+  /** @type {PlayerAndBoardData[]} */
   let history = [];
 
   return {
@@ -125,15 +126,17 @@ const createHistoryController = () => {
     },
 
     getData(turn) {
-      if (turn < 0) return null;
+      if (!this.isData(turn)) return null;
       return history[turn] || null;
     },
 
-    pushData(turn, data) {
+    pushData(turn, player, boardData) {
       if (history.length > turn) {
         history = history.slice(0, turn);
       }
-      history.push(data);
+
+      const turnData = { player, boardData };
+      history.push(turnData);
     },
 
     get length() {
@@ -148,7 +151,6 @@ const createHistoryController = () => {
  *   increment(): void;
  *   decrement(): void;
  *   current: number;
- *   player: Piece;
  * }} TurnCounter
  */
 
@@ -176,10 +178,6 @@ const createTurnCounter = () => {
 
     get current() {
       return count;
-    },
-
-    get player() {
-      return count % 2 === 0 ? 'black' : 'white';
     }
   };
 };
@@ -188,6 +186,7 @@ const createTurnCounter = () => {
  * @typedef {{
  *   resetSkip(): void,
  *   skip(): void,
+ *   setPlayer(player: Piece): void,
  *   currentPlayer: Piece,
  *   nextPlayer: Piece
  * }} PlayerM
@@ -210,6 +209,15 @@ const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } =
 
     skip() {
       skipCount++;
+    },
+
+    setPlayer(player) {
+      const index = playerOrder.indexOf(player);
+      if (index === -1) return;
+
+      const currentTurn = turnCounter.current;
+      const remainder = currentTurn % playerOrder.length;
+      skipCount = index > remainder ? index - remainder : index - remainder + playerOrder.length;
     },
 
     get currentPlayer() {
@@ -530,7 +538,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
 
   const progressTurn = () => {
     turnCounter.increment();
-    historyCon.pushData(turnCounter.current, boardDataCon.current);
+    historyCon.pushData(turnCounter.current, playerM.currentPlayer, boardDataCon.current);
     renderer.render();
   };
 
@@ -556,10 +564,38 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       case 'gameOver':
         // 両者置けない -> ゲーム終了
         // 内部ターンカウントは増やさず、履歴に次ターンのものとして追加
-        historyCon.pushData(turnCounter.current + 1, boardDataCon.current);
+        historyCon.pushData(turnCounter.current + 1, playerM.currentPlayer, boardDataCon.current);
         renderer.render();
         renderer.renderResult();
     }
+  };
+
+  const onUndo = () => {
+    turnCounter.decrement();
+    const dataToLoad = historyCon.getData(turnCounter.current);
+    if (dataToLoad === null) {
+      turnCounter.increment();
+      console.log('Error: Faild to load data!');
+      return;
+    }
+
+    boardDataCon.loadData(dataToLoad.boardData);
+    playerM.setPlayer(dataToLoad.player);
+    renderer.render();
+  };
+
+  const onRedo = () => {
+    turnCounter.increment();
+    const dataToLoad = historyCon.getData(turnCounter.current);
+    if (dataToLoad === null) {
+      turnCounter.decrement();
+      console.log('Error: Faild to load data!');
+      return;
+    }
+
+    playerM.setPlayer(dataToLoad.player);
+    boardDataCon.loadData(dataToLoad.boardData);
+    renderer.render();
   };
 
   return {
@@ -570,7 +606,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       playerM.resetSkip();
 
       // 初期状態を履歴配列の0番目に保存
-      historyCon.pushData(turnCounter.current, boardDataCon.current);
+      historyCon.pushData(turnCounter.current, playerM.currentPlayer, boardDataCon.current);
 
       renderer.render();
     },
@@ -607,14 +643,8 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       });
 
       restartButton.addEventListener('click', () => this.initGame());
-      // undoButton.addEventListener('click', () => onUndo());
-      // undoButton.addEventListener('click', () => onRedo());
-      undoButton.addEventListener('click', () => {
-        // test
-        console.log(turnCounter.current);
-        turnCounter.decrement();
-        renderer.render();
-      });
+      undoButton.addEventListener('click', () => onUndo());
+      redoButton.addEventListener('click', () => onRedo());
     }
   };
 };
