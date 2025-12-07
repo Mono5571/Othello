@@ -457,14 +457,14 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     boardDataCon.flipCells(cellsToFlip, currentPlayer);
     boardDataCon.setCell({ r, c }, currentPlayer);
 
-    progressTurn();
+    manageGameProgression();
   };
 
   /**
    * プレイヤーに valid move があるかを判定してゲーム進行を決めるヘルパー関数
    * @returns {'usual' | 'skip' | 'gameOver'}
    */
-  const decideTurnProgression = () => {
+  const decideProgressionCase = () => {
     // 次のプレイヤーに石を置ける場所があるかを判定
     const validMovesNextPL = moveRules.getValidMoves(playerM.nextPlayer);
     // 次のプレイヤーに石を置ける場所がある -> 通常のゲーム進行
@@ -481,7 +481,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     return 'gameOver';
   };
 
-  const usualProgress = () => {
+  const progressTurn = () => {
     turnCounter.increment();
     historyCon.pushData(turnCounter.current, boardDataCon.current);
     renderer.render();
@@ -492,20 +492,19 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
    * 現在の盤面状態を基に、次のターンの状態遷移を管理する。
    * 責務: ターンインクリメント、履歴保存、レンダリング。
    */
-  const progressTurn = () => {
-    const progressCase = decideTurnProgression();
+  const manageGameProgression = () => {
+    const progressCase = decideProgressionCase();
     switch (progressCase) {
       case 'usual':
         // 通常のターン進行
-        usualProgress();
+        progressTurn();
         break;
       case 'skip':
-        // 次のプレイヤーはパス -> スキップ処理
-        renderer.render();
+        // スキップ処理
         renderer.renderSkip(playerM.nextPlayer);
         playerM.skip();
-        // 通常のターン進行に合流
-        usualProgress();
+        // ターンを進める
+        progressTurn();
         break;
       case 'gameOver':
         // 両者置けない -> ゲーム終了
