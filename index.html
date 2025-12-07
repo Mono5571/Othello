@@ -4,26 +4,40 @@
     <meta charset="utf-8" />
     <title>オセロ</title>
     <style>
+      :root {
+        --piece-size: 40px;
+      }
+
       td {
         width: 60px;
         height: 60px;
         background-color: rgb(139, 221, 139);
         background-color: oklch(80.735% 0.14838 142.189);
-        text-align: center;
-        font-size: 2.6rem;
+        position: relative;
         cursor: pointer;
       }
 
+      .othello__piece {
+        position: absolute;
+        display: block;
+        top: 50%;
+        left: 50%;
+        translate: -50% -50%;
+        width: var(--piece-size);
+        height: var(--piece-size);
+        border-radius: 100vmax;
+      }
+
       .othello__piece.empty {
-        color: transparent;
+        background-color: transparent;
       }
 
       .othello__piece.black {
-        color: #333;
+        background-color: #333;
       }
 
       .othello__piece.white {
-        color: #fff;
+        background-color: #fff;
       }
     </style>
     <script src="script.js" type="module" defer></script>
