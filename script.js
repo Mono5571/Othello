@@ -147,8 +147,7 @@ const createHistoryController = () => {
 
 /**
  * ターンを管理するコントローラー (の作成)
- * 責務: ターン数の増減、リセット、現在ターン数の提供、
- * および現在どちらのプレイヤーの手番かを知らせる (改修時は分離すべき？)
+ * 責務: ターン数の増減、リセット、現在ターン数の提供
  *
  * @returns {TurnCounter}
  */
@@ -182,16 +181,19 @@ const createTurnCounter = () => {
  * @typedef {{
  *   resetSkip(): void,
  *   skip(): void,
- *   getTurnPL(turn: number): Piece
+ *   currentPlayer: Piece,
+ *   nextPlayer: Piece
  * }} PlayerM
  */
 /**
  * ターンカウントに基づき、スキップ回数を考慮したそのターンのプレイヤーを決定するモジュール
+ * 依存: turnCounter
+ * @param {TurnCounter} turnCounter
  * @param {object} options
  * @param {Piece[]} [options.playerOrder]
  * @returns {PlayerM}
  */
-const createPlayerManager = ({ playerOrder = ['black', 'white'] } = {}) => {
+const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } = {}) => {
   let skipCount = 0;
 
   return {
@@ -203,13 +205,13 @@ const createPlayerManager = ({ playerOrder = ['black', 'white'] } = {}) => {
       skipCount++;
     },
 
-    /**
-     *
-     * @param {number} turn
-     * @returns {Piece}
-     */
-    getTurnPL(turn) {
-      const index = (turn + skipCount) % playerOrder.length;
+    get currentPlayer() {
+      const index = (turnCounter.current + skipCount) % playerOrder.length;
+      return playerOrder[index];
+    },
+
+    get nextPlayer() {
+      const index = (turnCounter.current + 1 + skipCount) % playerOrder.length;
       return playerOrder[index];
     }
   };
@@ -249,7 +251,6 @@ const createRenderer = (boardDataCon, turnCounter, playerM) => {
       for (let c = 0; c < 8; c++) {
         const td = document.createElement('td');
         const cellElement = document.createElement('span');
-        cellElement.textContent = '●';
 
         cellElement.className = 'othello__piece empty';
         td.appendChild(cellElement);
@@ -294,7 +295,7 @@ const createRenderer = (boardDataCon, turnCounter, playerM) => {
       const currentBoardData = boardDataCon.current;
       const currentTurn = turnCounter.current;
       const turnOnText = currentTurn + 1;
-      const currentPlayer = playerM.getTurnPL(currentTurn);
+      const currentPlayer = playerM.currentPlayer;
 
       renderBoard(currentBoardData);
       renderInfo(turnOnText, currentPlayer);
@@ -446,7 +447,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
    * @param {Coordinate} clickedCoord
    */
   const handleCellClick = ({ r, c }) => {
-    const currentPlayer = playerM.getTurnPL(turnCounter.current);
+    const currentPlayer = playerM.currentPlayer;
     const cellsToFlip = moveRules.getFlipCandidates({ r, c }, currentPlayer);
     if (cellsToFlip === null) {
       console.log('Error: Invalid move!');
@@ -456,45 +457,63 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     boardDataCon.flipCells(cellsToFlip, currentPlayer);
     boardDataCon.setCell({ r, c }, currentPlayer);
 
-    manageTurnProgression();
+    progressTurn();
   };
 
   /**
-   * 現在の盤面状態を基に、次のターンの状態遷移を管理する。
-   * 責務: ターンインクリメント、履歴保存、パス/終了判定、レンダリング。
+   * プレイヤーに valid move があるかを判定してゲーム進行を決めるヘルパー関数
+   * @returns {'usual' | 'skip' | 'gameOver'}
    */
-  const manageTurnProgression = () => {
-    const nextTurn = turnCounter.current + 1;
-    historyCon.pushData(nextTurn, boardDataCon.current);
+  const decideTurnProgression = () => {
+    // 次のプレイヤーに石を置ける場所があるかを判定
+    const validMovesNextPL = moveRules.getValidMoves(playerM.nextPlayer);
+    // 次のプレイヤーに石を置ける場所がある -> 通常のゲーム進行
+    if (validMovesNextPL.length > 0) return 'usual';
 
-    // 次のプレイヤーを判定
-    const nextPlayer = playerM.getTurnPL(nextTurn);
-    const validMovesNextPL = moveRules.getValidMoves(nextPlayer);
+    // 次のプレイヤーに石を置ける場所がない -> スキップまたはゲームオーバー
+    // プレイヤーを戻して再チェック
+    const validMovesCurrentPL = moveRules.getValidMoves(playerM.currentPlayer);
 
-    // --- 状態遷移の判定ロジック ---
+    // 次の次の（現在の）プレイヤーに石を置ける場所がある -> スキップ
+    if (validMovesCurrentPL.length > 0) return 'skip';
 
-    // --- unDo, reDo の挙動がうまくいかない場合、この辺が原因の可能性あり ---
-    if (validMovesNextPL.length === 0) {
-      // 次のプレイヤーはパスの可能性がある
+    // 次の次の（現在の）プレイヤーに石を置ける場所がない -> ゲームオーバー
+    return 'gameOver';
+  };
 
-      const secondNextPlayer = playerM.getTurnPL(nextTurn + 1); // プレイヤーを戻して再チェック
-      const validMovesCurrentPL = moveRules.getValidMoves(secondNextPlayer);
+  const usualProgress = () => {
+    turnCounter.increment();
+    historyCon.pushData(turnCounter.current, boardDataCon.current);
+    renderer.render();
+  };
 
-      if (validMovesCurrentPL.length === 0) {
+  // --- unDo, reDo の挙動がうまくいかない場合、この辺が原因の可能性あり ---
+  /**
+   * 現在の盤面状態を基に、次のターンの状態遷移を管理する。
+   * 責務: ターンインクリメント、履歴保存、レンダリング。
+   */
+  const progressTurn = () => {
+    const progressCase = decideTurnProgression();
+    switch (progressCase) {
+      case 'usual':
+        // 通常のターン進行
+        usualProgress();
+        break;
+      case 'skip':
+        // 次のプレイヤーはパス -> スキップ処理
+        renderer.render();
+        renderer.renderSkip(playerM.nextPlayer);
+        playerM.skip();
+        // 通常のターン進行に合流
+        usualProgress();
+        break;
+      case 'gameOver':
         // 両者置けない -> ゲーム終了
+        // 内部ターンカウントは増やさず、履歴に次ターンのものとして追加
+        historyCon.pushData(turnCounter.current + 1, boardDataCon.current);
         renderer.render();
         renderer.renderResult();
-        return;
-      }
-
-      // 次のプレイヤーはパス -> スキップ処理
-      playerM.skip();
-      renderer.renderSkip(nextPlayer);
     }
-
-    // 3. 通常のターン進行
-    turnCounter.increment();
-    renderer.render();
   };
 
   return {
@@ -545,7 +564,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const boardDataCon = createBoardDataController();
   const historyCon = createHistoryController();
   const turnCounter = createTurnCounter();
-  const playerM = createPlayerManager();
+
+  // DI (Dependency Injection 依存性の注入) して使う
+  const playerM = createPlayerManager(turnCounter);
 
   // DI (Dependency Injection 依存性の注入) して使う
   const renderer = createRenderer(boardDataCon, turnCounter, playerM);
