@@ -96,6 +96,7 @@ const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
 /**
  * @typedef {{
  *   init(): void;
+ *   isData(turn: number): boolean;
  *   getData(turn: number): BoardData | null;
  *   pushData(turn: number, data: BoardData): void;
  *   length: number
@@ -118,7 +119,13 @@ const createHistoryController = () => {
       history = [];
     },
 
+    isData(turn) {
+      if (turn < 0) return false;
+      return history.length > turn;
+    },
+
     getData(turn) {
+      if (turn < 0) return null;
       return history[turn] || null;
     },
 
@@ -221,12 +228,14 @@ const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } =
  * DOMのレンダリングをおこなうコントローラー (の作成)
  * 責務: 初回のDOM取得と構築及びキャッシュをおこない、Model (= Single Source of Truth たる boardData) から View の生成をする
  * 依存: boardDataCon, turn
- * @param {BoardDataCon} boardDataCon
- * @param {TurnCounter} turnCounter
- * @param {PlayerM} playerM
+ * @param {object} arguments
+ * @param {BoardDataCon} arguments.boardDataCon
+ * @param {TurnCounter} arguments.turnCounter
+ * @param {HistoryCon} arguments.historyCon
+ * @param {PlayerM} arguments.playerM
  * @returns {{render(): void, renderSkip(player: Piece): void, renderResult(): void} | undefined} renderer
  */
-const createRenderer = (boardDataCon, turnCounter, playerM) => {
+const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
   const table = document.getElementById('board-table');
   if (table === null || table instanceof HTMLTableElement !== true) {
     console.log('Error: Not found table on creating renderer!');
@@ -236,6 +245,13 @@ const createRenderer = (boardDataCon, turnCounter, playerM) => {
   const turnText = document.getElementById('turn-text');
   if (turnText === null) {
     console.log('Error: Not found turnText on creating renderer!');
+    return;
+  }
+
+  const undoButton = document.getElementById('undo-button');
+  const redoButton = document.getElementById('redo-button');
+  if (undoButton === null || redoButton === null) {
+    console.log('Error: Not found undo or redo button on creating renderer!');
     return;
   }
 
@@ -287,6 +303,34 @@ const createRenderer = (boardDataCon, turnCounter, playerM) => {
     turnText.textContent = `Turn: ${turn} | Player: ${currentPlayer}`;
   }; // --- renderInfo
 
+  /**
+   * @param {number} currentTurn
+   */
+  const renderUndoButton = (currentTurn) => {
+    const isPreviousData = historyCon.isData(currentTurn - 1);
+    if (isPreviousData) {
+      // @ts-ignore
+      undoButton.disabled = false;
+    } else {
+      // @ts-ignore
+      undoButton.disabled = true;
+    }
+  };
+
+  /**
+   * @param {number} currentTurn
+   */
+  const renderRedoButton = (currentTurn) => {
+    const isNextData = historyCon.isData(currentTurn + 1);
+    if (isNextData) {
+      // @ts-ignore
+      redoButton.disabled = false;
+    } else {
+      // @ts-ignore
+      redoButton.disabled = true;
+    }
+  };
+
   // DOM構築及びキャッシュを一度だけ実行
   buildAndCacheDOM();
 
@@ -294,11 +338,14 @@ const createRenderer = (boardDataCon, turnCounter, playerM) => {
     render() {
       const currentBoardData = boardDataCon.current;
       const currentTurn = turnCounter.current;
-      const turnOnText = currentTurn + 1;
       const currentPlayer = playerM.currentPlayer;
+
+      const turnOnText = currentTurn + 1;
 
       renderBoard(currentBoardData);
       renderInfo(turnOnText, currentPlayer);
+      renderUndoButton(currentTurn);
+      renderRedoButton(currentTurn);
     },
 
     /**
@@ -541,7 +588,12 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
         return;
       }
 
-      // undoButton, redoButton へのイベントリスナーの追加
+      const undoButton = document.getElementById('undo-button');
+      const redoButton = document.getElementById('redo-button');
+      if (undoButton === null || redoButton === null) {
+        console.log('Error: Not found undo or redo button on setting up event listener');
+        return;
+      }
 
       table.addEventListener('click', (e) => {
         // @ts-ignore
@@ -555,6 +607,14 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       });
 
       restartButton.addEventListener('click', () => this.initGame());
+      // undoButton.addEventListener('click', () => onUndo());
+      // undoButton.addEventListener('click', () => onRedo());
+      undoButton.addEventListener('click', () => {
+        // test
+        console.log(turnCounter.current);
+        turnCounter.decrement();
+        renderer.render();
+      });
     }
   };
 };
@@ -568,7 +628,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const playerM = createPlayerManager(turnCounter);
 
   // DI (Dependency Injection 依存性の注入) して使う
-  const renderer = createRenderer(boardDataCon, turnCounter, playerM);
+  const renderer = createRenderer({ boardDataCon, turnCounter, historyCon, playerM });
   if (renderer === undefined) {
     console.log('Error: Failed to create renderer!');
     return;
