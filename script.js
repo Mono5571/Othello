@@ -201,6 +201,7 @@ const createTurnCounter = () => {
  */
 const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } = {}) => {
   let skipCount = 0;
+  const orderLength = playerOrder.length;
 
   return {
     resetSkip() {
@@ -216,17 +217,19 @@ const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } =
       if (index === -1) return;
 
       const currentTurn = turnCounter.current;
-      const remainder = currentTurn % playerOrder.length;
-      skipCount = index > remainder ? index - remainder : index - remainder + playerOrder.length;
+      const remainder = currentTurn % orderLength;
+
+      // 負の数にならないように length を足してから剰余を取る一般的なテクニック
+      skipCount = (index - remainder + orderLength) % orderLength;
     },
 
     get currentPlayer() {
-      const index = (turnCounter.current + skipCount) % playerOrder.length;
+      const index = (turnCounter.current + skipCount) % orderLength;
       return playerOrder[index];
     },
 
     get nextPlayer() {
-      const index = (turnCounter.current + 1 + skipCount) % playerOrder.length;
+      const index = (turnCounter.current + 1 + skipCount) % orderLength;
       return playerOrder[index];
     }
   };
@@ -371,7 +374,7 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
       const { b, w } = boardDataCon.score;
 
       const appendix = b === w ? 'Draw!' : b > w ? 'Winner: black!' : 'Winner: White!';
-      const msg = `Turn: ${turnCounter.current + 1}, black: ${b}, white: ${w} ` + `${appendix}`;
+      const msg = `Turn: ${turnCounter.current}, black: ${b}, white: ${w} ` + `${appendix}`;
 
       turnText.textContent = msg;
     }
@@ -519,7 +522,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
    * プレイヤーに valid move があるかを判定してゲーム進行を決めるヘルパー関数
    * @returns {'usual' | 'skip' | 'gameOver'}
    */
-  const decideProgressionCase = () => {
+  const decideProgressionKey = () => {
     // 次のプレイヤーに石を置ける場所があるかを判定
     const validMovesNextPL = moveRules.getValidMoves(playerM.nextPlayer);
     // 次のプレイヤーに石を置ける場所がある -> 通常のゲーム進行
@@ -536,38 +539,39 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     return 'gameOver';
   };
 
-  const progressTurn = () => {
+  const proceedUsualTurn = () => {
+    // 通常のターン進行
     turnCounter.increment();
     historyCon.pushData(turnCounter.current, playerM.currentPlayer, boardDataCon.current);
     renderer.render();
   };
 
-  // --- unDo, reDo の挙動がうまくいかない場合、この辺が原因の可能性あり ---
+  /** @type {{usual(): void; skip(): void; gameOver(): void}} */
+  const progressionKeyMap = {
+    usual: proceedUsualTurn,
+    skip() {
+      // スキップ処理
+      renderer.renderSkip(playerM.nextPlayer);
+      playerM.skip();
+      // ターンを進める
+      proceedUsualTurn();
+    },
+    gameOver() {
+      // 両者置けない -> ゲーム終了
+      turnCounter.increment();
+      historyCon.pushData(turnCounter.current, playerM.currentPlayer, boardDataCon.current);
+      renderer.render();
+      renderer.renderResult();
+    }
+  };
+
   /**
    * 現在の盤面状態を基に、次のターンの状態遷移を管理する。
    * 責務: ターンインクリメント、履歴保存、レンダリング。
    */
   const manageGameProgression = () => {
-    const progressCase = decideProgressionCase();
-    switch (progressCase) {
-      case 'usual':
-        // 通常のターン進行
-        progressTurn();
-        break;
-      case 'skip':
-        // スキップ処理
-        renderer.renderSkip(playerM.nextPlayer);
-        playerM.skip();
-        // ターンを進める
-        progressTurn();
-        break;
-      case 'gameOver':
-        // 両者置けない -> ゲーム終了
-        // 内部ターンカウントは増やさず、履歴に次ターンのものとして追加
-        historyCon.pushData(turnCounter.current + 1, playerM.currentPlayer, boardDataCon.current);
-        renderer.render();
-        renderer.renderResult();
-    }
+    const progressionKey = decideProgressionKey();
+    progressionKeyMap[progressionKey]();
   };
 
   const onUndo = () => {
@@ -596,6 +600,11 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     playerM.setPlayer(dataToLoad.player);
     boardDataCon.loadData(dataToLoad.boardData);
     renderer.render();
+
+    const progressionKey = decideProgressionKey();
+    if (progressionKey === 'gameOver') {
+      renderer.renderResult();
+    }
   };
 
   return {
@@ -632,11 +641,16 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       }
 
       table.addEventListener('click', (e) => {
-        // @ts-ignore
-        const td = e.target?.closest('td');
-        if (!td) return;
+        const target = e.target;
+        if (target == null || target instanceof HTMLElement === false) return;
 
-        const r = td.parentElement.rowIndex;
+        const td = target.closest('td');
+        if (td == null) return;
+
+        const tr = td.parentElement;
+        if (tr == null || tr instanceof HTMLTableRowElement === false) return;
+
+        const r = tr.rowIndex;
         const c = td.cellIndex;
 
         handleCellClick({ r, c });
