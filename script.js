@@ -7,6 +7,7 @@
 /** @typedef {'empty' | Piece} CellState */
 
 /** @typedef {CellState[][]} BoardData */
+/** @typedef {{ player: Piece, boardData: BoardData }} PlayerAndBoardData */
 
 /** @typedef {{r: number, c: number}} Coordinate */
 
@@ -96,8 +97,9 @@ const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
 /**
  * @typedef {{
  *   init(): void;
- *   getData(turn: number): BoardData | null;
- *   pushData(turn: number, data: BoardData): void;
+ *   isData(turn: number): boolean;
+ *   getData(turn: number): PlayerAndBoardData | null;
+ *   pushData(turn: number, player: Piece, boarddata: BoardData): void;
  *   length: number
  * }} HistoryCon
  */
@@ -110,7 +112,7 @@ const createBoardDataController = ({ initialPieces = INITIAL_PIECES } = {}) => {
  * @returns {HistoryCon}
  */
 const createHistoryController = () => {
-  /** @type {BoardData[]} */
+  /** @type {PlayerAndBoardData[]} */
   let history = [];
 
   return {
@@ -118,15 +120,23 @@ const createHistoryController = () => {
       history = [];
     },
 
+    isData(turn) {
+      if (turn < 0) return false;
+      return history.length > turn;
+    },
+
     getData(turn) {
+      if (!this.isData(turn)) return null;
       return history[turn] || null;
     },
 
-    pushData(turn, data) {
+    pushData(turn, player, boardData) {
       if (history.length > turn) {
         history = history.slice(0, turn);
       }
-      history.push(data);
+
+      const turnData = { player, boardData };
+      history.push(turnData);
     },
 
     get length() {
@@ -141,7 +151,6 @@ const createHistoryController = () => {
  *   increment(): void;
  *   decrement(): void;
  *   current: number;
- *   player: Piece;
  * }} TurnCounter
  */
 
@@ -169,10 +178,6 @@ const createTurnCounter = () => {
 
     get current() {
       return count;
-    },
-
-    get player() {
-      return count % 2 === 0 ? 'black' : 'white';
     }
   };
 };
@@ -181,6 +186,7 @@ const createTurnCounter = () => {
  * @typedef {{
  *   resetSkip(): void,
  *   skip(): void,
+ *   setPlayer(player: Piece): void,
  *   currentPlayer: Piece,
  *   nextPlayer: Piece
  * }} PlayerM
@@ -195,6 +201,7 @@ const createTurnCounter = () => {
  */
 const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } = {}) => {
   let skipCount = 0;
+  const orderLength = playerOrder.length;
 
   return {
     resetSkip() {
@@ -205,13 +212,24 @@ const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } =
       skipCount++;
     },
 
+    setPlayer(player) {
+      const index = playerOrder.indexOf(player);
+      if (index === -1) return;
+
+      const currentTurn = turnCounter.current;
+      const remainder = currentTurn % orderLength;
+
+      // 負の数にならないように length を足してから剰余を取る一般的なテクニック
+      skipCount = (index - remainder + orderLength) % orderLength;
+    },
+
     get currentPlayer() {
-      const index = (turnCounter.current + skipCount) % playerOrder.length;
+      const index = (turnCounter.current + skipCount) % orderLength;
       return playerOrder[index];
     },
 
     get nextPlayer() {
-      const index = (turnCounter.current + 1 + skipCount) % playerOrder.length;
+      const index = (turnCounter.current + 1 + skipCount) % orderLength;
       return playerOrder[index];
     }
   };
@@ -221,12 +239,14 @@ const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } =
  * DOMのレンダリングをおこなうコントローラー (の作成)
  * 責務: 初回のDOM取得と構築及びキャッシュをおこない、Model (= Single Source of Truth たる boardData) から View の生成をする
  * 依存: boardDataCon, turn
- * @param {BoardDataCon} boardDataCon
- * @param {TurnCounter} turnCounter
- * @param {PlayerM} playerM
+ * @param {object} arguments
+ * @param {BoardDataCon} arguments.boardDataCon
+ * @param {TurnCounter} arguments.turnCounter
+ * @param {HistoryCon} arguments.historyCon
+ * @param {PlayerM} arguments.playerM
  * @returns {{render(): void, renderSkip(player: Piece): void, renderResult(): void} | undefined} renderer
  */
-const createRenderer = (boardDataCon, turnCounter, playerM) => {
+const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
   const table = document.getElementById('board-table');
   if (table === null || table instanceof HTMLTableElement !== true) {
     console.log('Error: Not found table on creating renderer!');
@@ -236,6 +256,13 @@ const createRenderer = (boardDataCon, turnCounter, playerM) => {
   const turnText = document.getElementById('turn-text');
   if (turnText === null) {
     console.log('Error: Not found turnText on creating renderer!');
+    return;
+  }
+
+  const undoButton = document.getElementById('undo-button');
+  const redoButton = document.getElementById('redo-button');
+  if (undoButton === null || redoButton === null) {
+    console.log('Error: Not found undo or redo button on creating renderer!');
     return;
   }
 
@@ -287,6 +314,34 @@ const createRenderer = (boardDataCon, turnCounter, playerM) => {
     turnText.textContent = `Turn: ${turn} | Player: ${currentPlayer}`;
   }; // --- renderInfo
 
+  /**
+   * @param {number} currentTurn
+   */
+  const renderUndoButton = (currentTurn) => {
+    const isPreviousData = historyCon.isData(currentTurn - 1);
+    if (isPreviousData) {
+      // @ts-ignore
+      undoButton.disabled = false;
+    } else {
+      // @ts-ignore
+      undoButton.disabled = true;
+    }
+  };
+
+  /**
+   * @param {number} currentTurn
+   */
+  const renderRedoButton = (currentTurn) => {
+    const isNextData = historyCon.isData(currentTurn + 1);
+    if (isNextData) {
+      // @ts-ignore
+      redoButton.disabled = false;
+    } else {
+      // @ts-ignore
+      redoButton.disabled = true;
+    }
+  };
+
   // DOM構築及びキャッシュを一度だけ実行
   buildAndCacheDOM();
 
@@ -294,11 +349,14 @@ const createRenderer = (boardDataCon, turnCounter, playerM) => {
     render() {
       const currentBoardData = boardDataCon.current;
       const currentTurn = turnCounter.current;
-      const turnOnText = currentTurn + 1;
       const currentPlayer = playerM.currentPlayer;
+
+      const turnOnText = currentTurn + 1;
 
       renderBoard(currentBoardData);
       renderInfo(turnOnText, currentPlayer);
+      renderUndoButton(currentTurn);
+      renderRedoButton(currentTurn);
     },
 
     /**
@@ -316,7 +374,7 @@ const createRenderer = (boardDataCon, turnCounter, playerM) => {
       const { b, w } = boardDataCon.score;
 
       const appendix = b === w ? 'Draw!' : b > w ? 'Winner: black!' : 'Winner: White!';
-      const msg = `Turn: ${turnCounter.current + 1}, black: ${b}, white: ${w} ` + `${appendix}`;
+      const msg = `Turn: ${turnCounter.current}, black: ${b}, white: ${w} ` + `${appendix}`;
 
       turnText.textContent = msg;
     }
@@ -457,14 +515,14 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     boardDataCon.flipCells(cellsToFlip, currentPlayer);
     boardDataCon.setCell({ r, c }, currentPlayer);
 
-    progressTurn();
+    manageGameProgression();
   };
 
   /**
    * プレイヤーに valid move があるかを判定してゲーム進行を決めるヘルパー関数
    * @returns {'usual' | 'skip' | 'gameOver'}
    */
-  const decideTurnProgression = () => {
+  const decideProgressionKey = () => {
     // 次のプレイヤーに石を置ける場所があるかを判定
     const validMovesNextPL = moveRules.getValidMoves(playerM.nextPlayer);
     // 次のプレイヤーに石を置ける場所がある -> 通常のゲーム進行
@@ -481,38 +539,71 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     return 'gameOver';
   };
 
-  const usualProgress = () => {
+  const proceedUsualTurn = () => {
+    // 通常のターン進行
     turnCounter.increment();
-    historyCon.pushData(turnCounter.current, boardDataCon.current);
+    historyCon.pushData(turnCounter.current, playerM.currentPlayer, boardDataCon.current);
     renderer.render();
   };
 
-  // --- unDo, reDo の挙動がうまくいかない場合、この辺が原因の可能性あり ---
+  /** @type {{usual(): void; skip(): void; gameOver(): void}} */
+  const progressionKeyMap = {
+    usual: proceedUsualTurn,
+    skip() {
+      // スキップ処理
+      renderer.renderSkip(playerM.nextPlayer);
+      playerM.skip();
+      // ターンを進める
+      proceedUsualTurn();
+    },
+    gameOver() {
+      // 両者置けない -> ゲーム終了
+      turnCounter.increment();
+      historyCon.pushData(turnCounter.current, playerM.currentPlayer, boardDataCon.current);
+      renderer.render();
+      renderer.renderResult();
+    }
+  };
+
   /**
    * 現在の盤面状態を基に、次のターンの状態遷移を管理する。
    * 責務: ターンインクリメント、履歴保存、レンダリング。
    */
-  const progressTurn = () => {
-    const progressCase = decideTurnProgression();
-    switch (progressCase) {
-      case 'usual':
-        // 通常のターン進行
-        usualProgress();
-        break;
-      case 'skip':
-        // 次のプレイヤーはパス -> スキップ処理
-        renderer.render();
-        renderer.renderSkip(playerM.nextPlayer);
-        playerM.skip();
-        // 通常のターン進行に合流
-        usualProgress();
-        break;
-      case 'gameOver':
-        // 両者置けない -> ゲーム終了
-        // 内部ターンカウントは増やさず、履歴に次ターンのものとして追加
-        historyCon.pushData(turnCounter.current + 1, boardDataCon.current);
-        renderer.render();
-        renderer.renderResult();
+  const manageGameProgression = () => {
+    const progressionKey = decideProgressionKey();
+    progressionKeyMap[progressionKey]();
+  };
+
+  const onUndo = () => {
+    turnCounter.decrement();
+    const dataToLoad = historyCon.getData(turnCounter.current);
+    if (dataToLoad === null) {
+      turnCounter.increment();
+      console.log('Error: Faild to load data!');
+      return;
+    }
+
+    boardDataCon.loadData(dataToLoad.boardData);
+    playerM.setPlayer(dataToLoad.player);
+    renderer.render();
+  };
+
+  const onRedo = () => {
+    turnCounter.increment();
+    const dataToLoad = historyCon.getData(turnCounter.current);
+    if (dataToLoad === null) {
+      turnCounter.decrement();
+      console.log('Error: Faild to load data!');
+      return;
+    }
+
+    playerM.setPlayer(dataToLoad.player);
+    boardDataCon.loadData(dataToLoad.boardData);
+    renderer.render();
+
+    const progressionKey = decideProgressionKey();
+    if (progressionKey === 'gameOver') {
+      renderer.renderResult();
     }
   };
 
@@ -524,7 +615,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       playerM.resetSkip();
 
       // 初期状態を履歴配列の0番目に保存
-      historyCon.pushData(turnCounter.current, boardDataCon.current);
+      historyCon.pushData(turnCounter.current, playerM.currentPlayer, boardDataCon.current);
 
       renderer.render();
     },
@@ -542,20 +633,32 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
         return;
       }
 
-      // undoButton, redoButton へのイベントリスナーの追加
+      const undoButton = document.getElementById('undo-button');
+      const redoButton = document.getElementById('redo-button');
+      if (undoButton === null || redoButton === null) {
+        console.log('Error: Not found undo or redo button on setting up event listener');
+        return;
+      }
 
       table.addEventListener('click', (e) => {
-        // @ts-ignore
-        const td = e.target?.closest('td');
-        if (!td) return;
+        const target = e.target;
+        if (target == null || target instanceof HTMLElement === false) return;
 
-        const r = td.parentElement.rowIndex;
+        const td = target.closest('td');
+        if (td == null) return;
+
+        const tr = td.parentElement;
+        if (tr == null || tr instanceof HTMLTableRowElement === false) return;
+
+        const r = tr.rowIndex;
         const c = td.cellIndex;
 
         handleCellClick({ r, c });
       });
 
       restartButton.addEventListener('click', () => this.initGame());
+      undoButton.addEventListener('click', () => onUndo());
+      redoButton.addEventListener('click', () => onRedo());
     }
   };
 };
@@ -569,7 +672,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const playerM = createPlayerManager(turnCounter);
 
   // DI (Dependency Injection 依存性の注入) して使う
-  const renderer = createRenderer(boardDataCon, turnCounter, playerM);
+  const renderer = createRenderer({ boardDataCon, turnCounter, historyCon, playerM });
   if (renderer === undefined) {
     console.log('Error: Failed to create renderer!');
     return;

@@ -40,11 +40,13 @@
         background-color: #fff;
       }
     </style>
-    <script src="script.js" type="module" defer></script>
+    <script src="script.js" defer></script>
   </head>
   <body>
     <table id="board-table"></table>
     <p id="turn-text">黒の手番です</p>
     <button type="button" id="restart-button">リスタート</button>
+    <button type="button" id="undo-button" disabled>一手戻る</button>
+    <button type="button" id="redo-button" disabled>一手進む</button>
   </body>
 </html>
