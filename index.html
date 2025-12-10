@@ -6,6 +6,8 @@
     <style>
       :root {
         --piece-size: 40px;
+        --button-bg-color: #ddd;
+        --button-bg-color-disabled: oklch(from var(--button-bg-color) 60% c h / alpha);
       }
 
       td {
@@ -38,6 +40,25 @@
 
       .othello__piece.white {
         background-color: #fff;
+      }
+
+      button {
+        /* ブラウザのデフォルトのスタイルをリセット */
+        padding: 0;
+        border: none;
+        outline: none;
+        font: inherit;
+        color: inherit;
+        background: none;
+      }
+
+      button {
+        padding: 1em 1.5em;
+        background-color: var(--button-bg-color);
+
+        &[disabled] {
+          background-color: var(--button-bg-color-disabled);
+        }
       }
     </style>
     <script src="script.js" defer></script>
