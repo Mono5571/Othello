@@ -388,7 +388,7 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
         undoButton.disabled = true;
         redoButton.disabled = true;
       } else {
-        const currentTurn = turnCounter.current + 1;
+        const currentTurn = turnCounter.current;
         renderUndoButton(currentTurn);
         renderRedoButton(currentTurn);
       }
