@@ -236,6 +236,9 @@ const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } =
 };
 
 /**
+ * @typedef {{render(): void, renderSkip(player: Piece): void, renderResult(): void, renderInteractive(isInteractive: boolean): void} | undefined} Renderer
+ */
+/**
  * DOMのレンダリングをおこなうコントローラー (の作成)
  * 責務: 初回のDOM取得と構築及びキャッシュをおこない、Model (= Single Source of Truth たる boardData) から View の生成をする
  * 依存: boardDataCon, turn
@@ -244,7 +247,7 @@ const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } =
  * @param {TurnCounter} arguments.turnCounter
  * @param {HistoryCon} arguments.historyCon
  * @param {PlayerM} arguments.playerM
- * @returns {{render(): void, renderSkip(player: Piece): void, renderResult(): void} | undefined} renderer
+ * @returns {Renderer}
  */
 const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
   const table = document.getElementById('board-table');
@@ -263,6 +266,11 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
   const redoButton = document.getElementById('redo-button');
   if (undoButton === null || redoButton === null) {
     console.log('Error: Not found undo or redo button on creating renderer!');
+    return;
+  }
+
+  if (undoButton instanceof HTMLButtonElement === false || redoButton instanceof HTMLButtonElement === false) {
+    console.log('Error: undo or redo button is not a button.');
     return;
   }
 
@@ -320,10 +328,8 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
   const renderUndoButton = (currentTurn) => {
     const isPreviousData = historyCon.isData(currentTurn - 1);
     if (isPreviousData) {
-      // @ts-ignore
       undoButton.disabled = false;
     } else {
-      // @ts-ignore
       undoButton.disabled = true;
     }
   };
@@ -334,10 +340,8 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
   const renderRedoButton = (currentTurn) => {
     const isNextData = historyCon.isData(currentTurn + 1);
     if (isNextData) {
-      // @ts-ignore
       redoButton.disabled = false;
     } else {
-      // @ts-ignore
       redoButton.disabled = true;
     }
   };
@@ -377,6 +381,17 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
       const msg = `Turn: ${turnCounter.current}, black: ${b}, white: ${w} ` + `${appendix}`;
 
       turnText.textContent = msg;
+    },
+
+    renderInteractive(isInteractive) {
+      if (isInteractive === false) {
+        undoButton.disabled = true;
+        redoButton.disabled = true;
+      } else {
+        const currentTurn = turnCounter.current + 1;
+        renderUndoButton(currentTurn);
+        renderRedoButton(currentTurn);
+      }
     }
   };
 };
@@ -384,7 +399,8 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
 /**
  * @typedef {{
  *   getFlipCandidates(coordinate: Coordinate, pieceToPlace: Piece): null | Coordinate[];
- *   getValidMoves(pieceToPlace: Piece): Coordinate[]
+ *   getValidMoves(pieceToPlace: Piece): Coordinate[];
+ *   getMovesAndFlips(pieceToPlace: Piece): {coordinate: Coordinate, flipCandidates: Coordinate[]}[]
  * }} MoveRules
  */
 /**
@@ -452,32 +468,111 @@ const createMoveRules = (boardDataCon) => {
     return [];
   };
 
-  return {
-    /**
-     * 指定された座標に対して、ある色の石を置いたときに裏返せる石の座標群を配列の形で返す関数
-     * 裏返せる石がない場合は null を返す
-     * @param {Coordinate} coordinate
-     * @param {Piece} pieceToPlace
-     * @returns {null | Coordinate[]}
-     */
-    getFlipCandidates({ r, c }, pieceToPlace) {
-      if (boardDataCon.getCell({ r, c }) !== 'empty') return null;
-      /** @type {Coordinate[]} */
-      const allCandidates = [];
-      DIRECTIONS.forEach((direction) => {
-        const candidatesInDir = checkDirection({ r, c }, pieceToPlace, direction);
-        allCandidates.push(...candidatesInDir);
-      });
-      if (allCandidates.length === 0) return null;
-      return allCandidates;
-    },
+  /**
+   * 指定された座標に対して、ある色の石を置いたときに裏返せる石の座標群を配列の形で返す関数
+   * 裏返せる石がない場合は null を返す
+   * @param {Coordinate} coordinate
+   * @param {Piece} pieceToPlace
+   * @returns {null | Coordinate[]}
+   */
+  const getFlipCandidates = ({ r, c }, pieceToPlace) => {
+    if (boardDataCon.getCell({ r, c }) !== 'empty') return null;
+    /** @type {Coordinate[]} */
+    const allCandidates = [];
+    DIRECTIONS.forEach((direction) => {
+      const candidatesInDir = checkDirection({ r, c }, pieceToPlace, direction);
+      allCandidates.push(...candidatesInDir);
+    });
+    if (allCandidates.length === 0) return null;
+    return allCandidates;
+  };
 
-    getValidMoves(pieceToPlace) {
-      const allCoords = Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (_, c) => ({ r, c }))).flat();
-      // [{ r: 0, c: 0 }, { r: 0, c: 1 }, ..., { r: 7, c: 7 }]
-      const validMoves = allCoords.filter((coords) => this.getFlipCandidates(coords, pieceToPlace));
-      return validMoves;
+  const allCoords = Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (_, c) => ({ r, c }))).flat();
+  // [{ r: 0, c: 0 }, { r: 0, c: 1 }, ..., { r: 7, c: 7 }]
+
+  /**
+   *
+   * @param {Piece} pieceToPlace
+   * @returns {Coordinate[]}
+   */
+  const getValidMoves = (pieceToPlace) => {
+    const validMoves = allCoords.filter((coords) => getFlipCandidates(coords, pieceToPlace));
+    return validMoves;
+  };
+
+  /**
+   *
+   * @param {Piece} pieceToPlace
+   * @returns {{coordinate: Coordinate, flipCandidates: Coordinate[]}[]}
+   */
+  const getMovesAndFlips = (pieceToPlace) => {
+    /** @type {{coordinate: Coordinate, flipCandidates: Coordinate[]}[]} */
+    const movesAndFlips = [];
+    allCoords.forEach((coordinate) => {
+      const flipCandidates = getFlipCandidates(coordinate, pieceToPlace);
+      if (flipCandidates !== null) movesAndFlips.push({ coordinate, flipCandidates });
+    });
+    return movesAndFlips;
+  };
+
+  return { getFlipCandidates, getValidMoves, getMovesAndFlips };
+};
+
+// ----- BOT -----
+/**
+ * @typedef {{
+ *   piece: Piece | null,
+ *   think(): null | {coordinate: Coordinate, flipCandidates: Coordinate[]}
+ * }} Bot
+ */
+/**
+ * bot の思考ルーチン
+ * @param {MoveRules} moveRules
+ * @param {object} options
+ * @param {Piece | null} [options.piece]
+ * @returns
+ */
+const createBot = (moveRules, { piece = 'white' } = {}) => {
+  /** @type {Piece | null} */
+  let botPiece = piece;
+  // 設定から石を決定する処理をのちほど追加
+
+  const think = () => {
+    if (botPiece === null) return null;
+    const movesAndFlips = moveRules.getMovesAndFlips(botPiece);
+
+    if (movesAndFlips.length === 0) {
+      console.log('Error: No valid move for bot on bot thinking!');
+      return null;
     }
+
+    // greedy な思考: なるべく多く石を裏返せる手を探す
+    const { coordinate, flipCandidates } = movesAndFlips.reduce((pre, cur) => {
+      const preFlipsAmount = pre.flipCandidates.length;
+      const curFlipsAmount = cur.flipCandidates.length;
+
+      // 既存の値の方が大きければ維持
+      if (preFlipsAmount > curFlipsAmount) return pre;
+      // 現在の値の方が大きければ更新
+      if (preFlipsAmount < curFlipsAmount) return cur;
+
+      return Math.random() < 0.5 ? pre : cur;
+    });
+
+    // 同点の場合: ランダムに選択
+    return { coordinate, flipCandidates };
+    // 石を置くセルの座標とそれによって裏返せる石の配列を返す
+    // -> handleCellClick (must be renamed) に渡す
+  };
+
+  return {
+    set piece(piece) {
+      botPiece = piece;
+    },
+    get piece() {
+      return botPiece;
+    },
+    think
   };
 };
 
@@ -491,22 +586,52 @@ const createMoveRules = (boardDataCon) => {
  * @param {BoardDataCon} arguments.boardDataCon
  * @param {HistoryCon} arguments.historyCon
  * @param {TurnCounter} arguments.turnCounter
- * @param {{render(): void, renderSkip(player: Piece): void, renderResult(): void}} arguments.renderer
+ * @param {Renderer} arguments.renderer
  * @param {MoveRules} arguments.moveRules
  * @param {PlayerM} arguments.playerM
+ * @param {Bot} arguments.bot
  * @returns {{
  *   initGame(): void,
  *   setupEventListeners(): void
- * }} othelloCon
+ * } | undefined} othelloCon
  */
-const createOthelloController = ({ boardDataCon, historyCon, turnCounter, renderer, moveRules, playerM }) => {
+const createOthelloController = ({ boardDataCon, historyCon, turnCounter, renderer, moveRules, playerM, bot }) => {
+  if (renderer == null) return;
+  let isInteractive = true;
+
+  /** @param {boolean} boolean */
+  const setInteractive = (boolean) => {
+    isInteractive = boolean;
+    // CSSクラスの付与やボタンのdisabled化など、見た目も同期させる
+    renderer.renderInteractive(boolean);
+  };
+
+  /**
+   * UIイベント用ラッパー関数（デコレーター）
+   * インタラクティブモード時のみ関数を実行する
+   * @param {(...args: any) => any} func - 実行したい関数
+   * @returns {(...args: any) => any} - ガード付き関数
+   */
+  const runIfInteractive = (func) => {
+    return (...args) => {
+      // シンプルにフラグだけをチェック
+      if (isInteractive === false) {
+        console.log('Ignore input: currently processing bot turn.');
+        return;
+      }
+      return func(...args);
+    };
+  };
+
   /**
    *
    * @param {Coordinate} clickedCoord
+   * @param {Coordinate[] | null} [cellsToFlip]
    */
-  const handleCellClick = ({ r, c }) => {
+  const handleMove = ({ r, c }, cellsToFlip = null) => {
     const currentPlayer = playerM.currentPlayer;
-    const cellsToFlip = moveRules.getFlipCandidates({ r, c }, currentPlayer);
+
+    cellsToFlip = cellsToFlip ?? moveRules.getFlipCandidates({ r, c }, currentPlayer);
     if (cellsToFlip === null) {
       console.log('Error: Invalid move!');
       return;
@@ -531,7 +656,6 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     // 次のプレイヤーに石を置ける場所がない -> スキップまたはゲームオーバー
     // プレイヤーを戻して再チェック
     const validMovesCurrentPL = moveRules.getValidMoves(playerM.currentPlayer);
-
     // 次の次の（現在の）プレイヤーに石を置ける場所がある -> スキップ
     if (validMovesCurrentPL.length > 0) return 'skip';
 
@@ -565,13 +689,39 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     }
   };
 
-  /**
-   * 現在の盤面状態を基に、次のターンの状態遷移を管理する。
-   * 責務: ターンインクリメント、履歴保存、レンダリング。
-   */
   const manageGameProgression = () => {
     const progressionKey = decideProgressionKey();
     progressionKeyMap[progressionKey]();
+
+    const nextPlayer = playerM.currentPlayer;
+
+    // 次ターンのプレイヤーが bot の場合
+    if (nextPlayer === bot.piece) proceedBotMove();
+  };
+
+  // async にすることで wait しやすくしておく
+  const proceedBotMove = async () => {
+    // 1. UI をロックして操作を受け付けないようにしておく
+    setInteractive(false);
+
+    // 2. 演出として bot のシンキングタイムをもうける
+    await new Promise((r) => setTimeout(r, 700));
+    // -> この意味を調べて理解する
+
+    // 3. bot に考えさせる
+    const botMove = bot.think();
+
+    // bot の valid な手がない例外のガード
+    if (botMove == null) {
+      console.log('Error: Unintended case occured, No bot move!');
+      return;
+    }
+
+    // 4. bot の考えた手をプレイヤーの入力と同じ関数で処理
+    handleMove(botMove.coordinate, botMove.flipCandidates);
+
+    // 5. UI のロックを解除
+    setInteractive(true);
   };
 
   const onUndo = () => {
@@ -607,18 +757,20 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     }
   };
 
+  const initGame = () => {
+    boardDataCon.init();
+    historyCon.init();
+    turnCounter.init();
+    playerM.resetSkip();
+
+    // 初期状態を履歴配列の0番目に保存
+    historyCon.pushData(turnCounter.current, playerM.currentPlayer, boardDataCon.current);
+
+    renderer.render();
+  };
+
   return {
-    initGame() {
-      boardDataCon.init();
-      historyCon.init();
-      turnCounter.init();
-      playerM.resetSkip();
-
-      // 初期状態を履歴配列の0番目に保存
-      historyCon.pushData(turnCounter.current, playerM.currentPlayer, boardDataCon.current);
-
-      renderer.render();
-    },
+    initGame,
 
     setupEventListeners() {
       const table = document.getElementById('board-table');
@@ -641,6 +793,11 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       }
 
       table.addEventListener('click', (e) => {
+        if (isInteractive === false) {
+          console.log('Ignored input: currently processing bot turn.');
+          return;
+        }
+
         const target = e.target;
         if (target == null || target instanceof HTMLElement === false) return;
 
@@ -653,12 +810,33 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
         const r = tr.rowIndex;
         const c = td.cellIndex;
 
-        handleCellClick({ r, c });
+        handleMove({ r, c });
       });
 
-      restartButton.addEventListener('click', () => this.initGame());
-      undoButton.addEventListener('click', () => onUndo());
-      redoButton.addEventListener('click', () => onRedo());
+      restartButton.addEventListener('click', () => {
+        if (isInteractive === false) {
+          console.log('Ignored input: currently processing bot turn.');
+          return;
+        }
+        initGame();
+      });
+      undoButton.addEventListener('click', runIfInteractive(onUndo));
+      /*
+      undoButton.addEventListener('click', () => {
+        if (isInteractive === false) {
+          console.log('Ignored input: currently processing bot turn.');
+          return;
+        }
+        onUndo();
+      });
+      */
+      redoButton.addEventListener('click', () => {
+        if (isInteractive === false) {
+          console.log('Ignored input: currently processing bot turn.');
+          return;
+        }
+        onRedo();
+      });
     }
   };
 };
@@ -681,8 +859,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // DI (Dependency Injection 依存性の注入) して使う
   const moveRules = createMoveRules(boardDataCon);
 
+  const bot = createBot(moveRules);
+
   // DI (Dependency Injection 依存性の注入) して使う
-  const othelloCon = createOthelloController({ boardDataCon, historyCon, turnCounter, renderer, moveRules, playerM });
+  const othelloCon = createOthelloController({
+    boardDataCon,
+    historyCon,
+    turnCounter,
+    renderer,
+    moveRules,
+    playerM,
+    bot
+  });
+
+  if (othelloCon == null) {
+    console.log('Error: Failed to construct Othello controller!');
+    return;
+  }
 
   othelloCon.initGame();
   othelloCon.setupEventListeners();
