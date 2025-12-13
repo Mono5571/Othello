@@ -397,10 +397,14 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
 };
 
 /**
+ * @typedef {{coordinate: Coordinate, flipCandidates: Coordinate[]}[]} MovesAndFlips
+ */
+
+/**
  * @typedef {{
  *   getFlipCandidates(coordinate: Coordinate, pieceToPlace: Piece): null | Coordinate[];
  *   getValidMoves(pieceToPlace: Piece): Coordinate[];
- *   getMovesAndFlips(pieceToPlace: Piece): {coordinate: Coordinate, flipCandidates: Coordinate[]}[]
+ *   getMovesAndFlips(pieceToPlace: Piece): MovesAndFlips
  * }} MoveRules
  */
 /**
@@ -503,10 +507,10 @@ const createMoveRules = (boardDataCon) => {
   /**
    *
    * @param {Piece} pieceToPlace
-   * @returns {{coordinate: Coordinate, flipCandidates: Coordinate[]}[]}
+   * @returns {MovesAndFlips}
    */
   const getMovesAndFlips = (pieceToPlace) => {
-    /** @type {{coordinate: Coordinate, flipCandidates: Coordinate[]}[]} */
+    /** @type {MovesAndFlips} */
     const movesAndFlips = [];
     allCoords.forEach((coordinate) => {
       const flipCandidates = getFlipCandidates(coordinate, pieceToPlace);
@@ -519,35 +523,16 @@ const createMoveRules = (boardDataCon) => {
 };
 
 // ----- BOT -----
-/**
- * @typedef {{
- *   piece: Piece | null,
- *   think(): null | {coordinate: Coordinate, flipCandidates: Coordinate[]}
- * }} Bot
- */
-/**
- * bot の思考ルーチン
- * @param {MoveRules} moveRules
- * @param {object} options
- * @param {Piece | null} [options.piece]
- * @returns
- */
-const createBot = (moveRules, { piece = 'white' } = {}) => {
-  /** @type {Piece | null} */
-  let botPiece = piece;
-  // 設定から石を決定する処理をのちほど追加
+// Strategy Pattern をもちいて書き換え
 
-  const think = () => {
-    if (botPiece === null) return null;
-    const movesAndFlips = moveRules.getMovesAndFlips(botPiece);
+const strategies = {
+  random: (/** @type {MovesAndFlips} */ movesAndFlips) => {
+    const randomInt = Math.trunc(Math.random() * movesAndFlips.length);
+    return movesAndFlips[randomInt];
+  },
 
-    if (movesAndFlips.length === 0) {
-      console.log('Error: No valid move for bot on bot thinking!');
-      return null;
-    }
-
-    // greedy な思考: なるべく多く石を裏返せる手を探す
-    const { coordinate, flipCandidates } = movesAndFlips.reduce((pre, cur) => {
+  greedy: (/** @type {MovesAndFlips} */ movesAndFlips) => {
+    return movesAndFlips.reduce((pre, cur) => {
       const preFlipsAmount = pre.flipCandidates.length;
       const curFlipsAmount = cur.flipCandidates.length;
 
@@ -558,9 +543,64 @@ const createBot = (moveRules, { piece = 'white' } = {}) => {
 
       return Math.random() < 0.5 ? pre : cur;
     });
+  },
 
-    // 同点の場合: ランダムに選択
-    return { coordinate, flipCandidates };
+  focusOnCorner: (/** @type {MovesAndFlips} */ movesAndFlips) => {
+    const corners = [
+      { r: 0, c: 0 },
+      { r: 0, c: 7 },
+      { r: 7, c: 0 },
+      { r: 7, c: 7 }
+    ];
+
+    /**
+     * @type {MovesAndFlips}
+     */
+    const cornerMoves = movesAndFlips.filter((m) =>
+      corners.some((corner) => corner.r === m.coordinate.r && corner.c === m.coordinate.c)
+    );
+
+    if (cornerMoves.length === 0) return strategies.greedy(movesAndFlips);
+
+    return strategies.random(cornerMoves);
+  }
+};
+
+/**
+ * @typedef {'random' | 'greedy' | 'focusOnCorner'} StrategyType
+ */
+
+/**
+ * @typedef {{
+ *   piece: Piece | null,
+ *   strategy: StrategyType,
+ *   move(): null | {coordinate: Coordinate, flipCandidates: Coordinate[]}
+ * }} Bot
+ */
+/**
+ * Bot の思考ルーチン
+ * @param {MoveRules} moveRules
+ * @param {object} options
+ * @param {Piece | null} [options.piece]
+ * @param {StrategyType} [options.strategyType]
+ * @returns {Bot}
+ */
+const createBot = (moveRules, { piece = 'white', strategyType = 'focusOnCorner' } = {}) => {
+  /** @type {Piece | null} */
+  let botPiece = piece;
+  // 設定から石を決定する処理をのちほど追加
+  let strategy = strategyType;
+
+  const move = () => {
+    if (botPiece === null) return null;
+    const movesAndFlips = moveRules.getMovesAndFlips(botPiece);
+
+    if (movesAndFlips.length === 0) {
+      console.log('Error: No valid move for bot on bot thinking!');
+      return null;
+    }
+
+    return strategies[strategy](movesAndFlips);
     // 石を置くセルの座標とそれによって裏返せる石の配列を返す
     // -> handleCellClick (must be renamed) に渡す
   };
@@ -569,10 +609,19 @@ const createBot = (moveRules, { piece = 'white' } = {}) => {
     set piece(piece) {
       botPiece = piece;
     },
+
     get piece() {
       return botPiece;
     },
-    think
+
+    /**
+     * @param {StrategyType} strategyType
+     */
+    set strategy(strategyType) {
+      strategy = strategyType;
+    },
+
+    move
   };
 };
 
@@ -706,10 +755,15 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
 
     // 2. 演出として bot のシンキングタイムをもうける
     await new Promise((r) => setTimeout(r, 700));
-    // -> この意味を調べて理解する
+
+    // 待っている間に状況が変わっていないか最終確認（念のため）
+    if (playerM.currentPlayer !== bot.piece) {
+      setInteractive(true);
+      return;
+    }
 
     // 3. bot に考えさせる
-    const botMove = bot.think();
+    const botMove = bot.move();
 
     // bot の valid な手がない例外のガード
     if (botMove == null) {
@@ -724,36 +778,85 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     setInteractive(true);
   };
 
-  const onUndo = () => {
+  /**
+   * Botの手番である限り、指定されたアクション(Undo/Redo)を繰り返すヘルパー
+   * @param {() => boolean} actionFunc performUndo, performRedo
+   */
+  const skipBotTurns = (actionFunc) => {
+    let turnPlayer = playerM.currentPlayer;
+
+    while (bot.piece && turnPlayer === bot.piece) {
+      const success = actionFunc();
+      if (!success) break; // 履歴の端に達したら終了
+      turnPlayer = playerM.currentPlayer;
+    }
+  };
+
+  /**
+   * 1ターン分のUndoを実行する内部関数
+   * @returns {boolean} 成功したかどうか
+   */
+  const performUndo = () => {
     turnCounter.decrement();
     const dataToLoad = historyCon.getData(turnCounter.current);
+
     if (dataToLoad === null) {
       turnCounter.increment();
       console.log('Error: Faild to load data!');
-      return;
+      return false; // 失敗したら false を返す
     }
 
     boardDataCon.loadData(dataToLoad.boardData);
     playerM.setPlayer(dataToLoad.player);
+    return true;
+  };
+
+  const onUndo = () => {
+    // まず1回戻す
+    if (!performUndo()) return;
+
+    skipBotTurns(performUndo);
+
     renderer.render();
   };
 
-  const onRedo = () => {
+  /**
+   * 1ターン分のRedoを実行する内部関数
+   * @returns {boolean} 成功したかどうか
+   */
+  const performRedo = () => {
     turnCounter.increment();
     const dataToLoad = historyCon.getData(turnCounter.current);
+
     if (dataToLoad === null) {
       turnCounter.decrement();
       console.log('Error: Faild to load data!');
-      return;
+      return false; // 失敗したら false を返す
     }
 
-    playerM.setPlayer(dataToLoad.player);
     boardDataCon.loadData(dataToLoad.boardData);
+    playerM.setPlayer(dataToLoad.player);
+    return true;
+  };
+
+  const onRedo = async () => {
+    if (!performRedo()) return;
+
+    skipBotTurns(performRedo);
+
     renderer.render();
 
     const progressionKey = decideProgressionKey();
     if (progressionKey === 'gameOver') {
       renderer.renderResult();
+    }
+
+    // Redoの結果、履歴が尽きて「Botの手番」で止まった場合のケア
+    // (プレイヤーが打った直後の状態までRedoした場合など)
+    const currentPlayer = playerM.currentPlayer;
+    if (bot.piece && currentPlayer === bot.piece) {
+      // Botの思考ルーチンをキックする
+      await proceedBotMove();
     }
   };
 
@@ -813,30 +916,9 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
         handleMove({ r, c });
       });
 
-      restartButton.addEventListener('click', () => {
-        if (isInteractive === false) {
-          console.log('Ignored input: currently processing bot turn.');
-          return;
-        }
-        initGame();
-      });
+      restartButton.addEventListener('click', runIfInteractive(initGame));
       undoButton.addEventListener('click', runIfInteractive(onUndo));
-      /*
-      undoButton.addEventListener('click', () => {
-        if (isInteractive === false) {
-          console.log('Ignored input: currently processing bot turn.');
-          return;
-        }
-        onUndo();
-      });
-      */
-      redoButton.addEventListener('click', () => {
-        if (isInteractive === false) {
-          console.log('Ignored input: currently processing bot turn.');
-          return;
-        }
-        onRedo();
-      });
+      redoButton.addEventListener('click', runIfInteractive(onRedo));
     }
   };
 };
