@@ -8,6 +8,9 @@
         --piece-size: 40px;
         --button-bg-color: #ddd;
         --button-bg-color-disabled: oklch(from var(--button-bg-color) 60% c h / alpha);
+
+        --setting-color: #222;
+        --setting-color-disabeld: oklch(from var(--setting-color) 60% c h / alpha);
       }
 
       td {
@@ -60,14 +63,71 @@
           background-color: var(--button-bg-color-disabled);
         }
       }
+
+      .setting-container {
+        display: block flex;
+      }
+
+      .setting {
+        padding-right: 1rem;
+      }
+
+      .setting[disabled] {
+        color: var(--setting-color-disabeld);
+      }
+
+      .radio-button-container {
+        display: block flex;
+        flex-direction: column;
+      }
     </style>
     <script src="script.js" defer></script>
   </head>
   <body>
     <table id="board-table"></table>
-    <p id="turn-text">黒の手番です</p>
+    <p id="turn-text">ターン: 1 | プレイヤー: 黒</p>
     <button type="button" id="restart-button">リスタート</button>
-    <button type="button" id="undo-button" disabled>一手戻る</button>
-    <button type="button" id="redo-button" disabled>一手進む</button>
+    <button type="button" id="undo-button" disabled>一手もどる</button>
+    <button type="button" id="redo-button" disabled>一手すすむ</button>
+
+    <div class="setting-container">
+      <fieldset class="setting setting__mode-select">
+        <legend>対戦モードの選択 (Botの強さ):</legend>
+        <div class="radio-button-container">
+          <div>
+            <input type="radio" id="mode-human" name="bot-mode" value="human" checked />
+            <label for="mode-human">対人戦 (Botなし)</label>
+          </div>
+
+          <div>
+            <input type="radio" id="mode-random" name="bot-mode" value="random" />
+            <label for="mode-random">ランダム (Easy)</label>
+          </div>
+          <div>
+            <input type="radio" id="mode-greedy" name="bot-mode" value="greedy" />
+            <label for="mode-greedy">強欲 (Normal)</label>
+          </div>
+          <div>
+            <input type="radio" id="mode-corner" name="bot-mode" value="focusOnCorner" />
+            <label for="mode-corner">角重視 (Hard)</label>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="setting setting__player-piece" id="player-piece-select" disabled>
+        <legend>プレイヤーの持ち駒を選択:</legend>
+        <div class="radio-button-container">
+          <div>
+            <input type="radio" id="piece-black" name="player-piece" value="black" checked />
+            <label for="piece-black">先手 (黒)</label>
+          </div>
+
+          <div>
+            <input type="radio" id="piece-white" name="player-piece" value="white" />
+            <label for="piece-white">後手 (白)</label>
+          </div>
+        </div>
+      </fieldset>
+    </div>
   </body>
 </html>
