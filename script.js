@@ -274,6 +274,12 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
     return;
   }
 
+  const restartButton = document.getElementById('restart-button');
+  if (restartButton === null || restartButton instanceof HTMLButtonElement === false) {
+    console.log('Error: Restart button is not found or is not a button.');
+    return;
+  }
+
   /**
    * @type {HTMLSpanElement[][]}
    */
@@ -387,10 +393,12 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
       if (isInteractive === false) {
         undoButton.disabled = true;
         redoButton.disabled = true;
+        restartButton.disabled = true;
       } else {
         const currentTurn = turnCounter.current;
         renderUndoButton(currentTurn);
         renderRedoButton(currentTurn);
+        restartButton.disabled = false;
       }
     }
   };
@@ -525,6 +533,10 @@ const createMoveRules = (boardDataCon) => {
 // ----- BOT -----
 // Strategy Pattern をもちいて書き換え
 
+/**
+ * @typedef {'random' | 'greedy' | 'focusOnCorner'} StrategyType
+ */
+
 const strategies = {
   random: (/** @type {MovesAndFlips} */ movesAndFlips) => {
     const randomInt = Math.trunc(Math.random() * movesAndFlips.length);
@@ -553,9 +565,7 @@ const strategies = {
       { r: 7, c: 7 }
     ];
 
-    /**
-     * @type {MovesAndFlips}
-     */
+    /** @type {MovesAndFlips} */
     const cornerMoves = movesAndFlips.filter((m) =>
       corners.some((corner) => corner.r === m.coordinate.r && corner.c === m.coordinate.c)
     );
@@ -567,13 +577,16 @@ const strategies = {
 };
 
 /**
- * @typedef {'random' | 'greedy' | 'focusOnCorner'} StrategyType
+ * 文字列が strategies のプロパティ名として存在するかを判別し、その文字列が StrategyType 型であるか否かを返す関数
+ * @param {string} str
+ * @returns {str is StrategyType}
  */
+const isStrategy = (str) => Object.hasOwn(strategies, str);
 
 /**
  * @typedef {{
  *   piece: Piece | null,
- *   strategy: StrategyType,
+ *   strategy: string,
  *   move(): null | {coordinate: Coordinate, flipCandidates: Coordinate[]}
  * }} Bot
  */
@@ -590,6 +603,7 @@ const createBot = (moveRules, { piece = 'white', strategyType = 'focusOnCorner' 
   let botPiece = piece;
   // 設定から石を決定する処理をのちほど追加
   let strategy = strategyType;
+  // TODO: DOM から strategyType を選べるようにする
 
   const move = () => {
     if (botPiece === null) return null;
@@ -599,6 +613,8 @@ const createBot = (moveRules, { piece = 'white', strategyType = 'focusOnCorner' 
       console.log('Error: No valid move for bot on bot thinking!');
       return null;
     }
+
+    if (!isStrategy(strategy)) return null;
 
     return strategies[strategy](movesAndFlips);
     // 石を置くセルの座標とそれによって裏返せる石の配列を返す
@@ -615,10 +631,14 @@ const createBot = (moveRules, { piece = 'white', strategyType = 'focusOnCorner' 
     },
 
     /**
-     * @param {StrategyType} strategyType
+     * @param {string} botMode
      */
-    set strategy(strategyType) {
-      strategy = strategyType;
+    set strategy(botMode) {
+      if (isStrategy(botMode)) strategy = botMode;
+    },
+
+    get strategy() {
+      return strategy;
     },
 
     move
@@ -646,7 +666,18 @@ const createBot = (moveRules, { piece = 'white', strategyType = 'focusOnCorner' 
  */
 const createOthelloController = ({ boardDataCon, historyCon, turnCounter, renderer, moveRules, playerM, bot }) => {
   if (renderer == null) return;
+
+  /**
+   * UI の HTML 要素がインタラクト可能か否かを決めるフラグ
+   * @type {boolean}
+   */
   let isInteractive = true;
+
+  /**
+   * 初回またはリスタート後に BOT の設定を DOM から読み込むか否かをきめるフラグ
+   * @type {boolean}
+   */
+  let isBotConfigurated = false;
 
   /** @param {boolean} boolean */
   const setInteractive = (boolean) => {
@@ -742,6 +773,8 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     const progressionKey = decideProgressionKey();
     progressionKeyMap[progressionKey]();
 
+    if (progressionKey === 'gameOver') return;
+
     const nextPlayer = playerM.currentPlayer;
 
     // 次ターンのプレイヤーが bot の場合
@@ -768,6 +801,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     // bot の valid な手がない例外のガード
     if (botMove == null) {
       console.log('Error: Unintended case occured, No bot move!');
+      setInteractive(true);
       return;
     }
 
@@ -849,6 +883,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     const progressionKey = decideProgressionKey();
     if (progressionKey === 'gameOver') {
       renderer.renderResult();
+      return;
     }
 
     // Redoの結果、履歴が尽きて「Botの手番」で止まった場合のケア
@@ -858,6 +893,36 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       // Botの思考ルーチンをキックする
       await proceedBotMove();
     }
+  };
+
+  /**
+   * プレイヤーが一手目を指したときにチェックされていたラジオボタンから BOT の設定をおこなうイベントリスナー
+   */
+  const setBotConfiguration = () => {
+    const checkedBotModeRadio = document.querySelector('input[name="bot-mode"]:checked');
+
+    if (checkedBotModeRadio === null || checkedBotModeRadio instanceof HTMLInputElement === false) {
+      console.log('Error: Not found checked radio button for mode.');
+      return;
+    }
+
+    const botMode = checkedBotModeRadio.value;
+
+    if (botMode === 'human') {
+      bot.piece = null;
+      return;
+    }
+
+    if (!isStrategy(botMode)) {
+      console.log('Error: Checked radio button has invalid value.');
+      return;
+    }
+
+    bot.strategy = botMode;
+    // test
+    bot.piece = 'white';
+
+    isBotConfigurated = true;
   };
 
   const initGame = () => {
@@ -870,6 +935,8 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     historyCon.pushData(turnCounter.current, playerM.currentPlayer, boardDataCon.current);
 
     renderer.render();
+
+    isBotConfigurated = false;
   };
 
   return {
@@ -900,6 +967,8 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
           console.log('Ignored input: currently processing bot turn.');
           return;
         }
+
+        if (!isBotConfigurated) setBotConfiguration();
 
         const target = e.target;
         if (target == null || target instanceof HTMLElement === false) return;
