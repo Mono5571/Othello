@@ -236,7 +236,13 @@ const createPlayerManager = (turnCounter, { playerOrder = ['black', 'white'] } =
 };
 
 /**
- * @typedef {{render(): void, renderSkip(player: Piece): void, renderResult(): void, renderInteractive(isInteractive: boolean): void} | undefined} Renderer
+ * @typedef {{
+ *   render(): void,
+ *   renderSkip(player: Piece): void,
+ *   renderResult(): void,
+ *   renderInteractive(isInteractive: boolean): void,
+ *   enablePieceSelect(enable: boolean): void
+ *   } | undefined} Renderer
  */
 /**
  * DOMのレンダリングをおこなうコントローラー (の作成)
@@ -280,11 +286,22 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
     return;
   }
 
+  const modeSelectField = document.getElementById('mode-select');
+  const playerPieceSelectField = document.getElementById('player-piece-select');
+  if (
+    modeSelectField instanceof HTMLFieldSetElement === false ||
+    playerPieceSelectField instanceof HTMLFieldSetElement === false
+  ) {
+    console.log("Error: At least one of the 'fieldsets' is not a fieldset element.");
+    return;
+  }
+
   /**
    * @type {HTMLSpanElement[][]}
    */
   const cellElements = [];
 
+  // -> もっといい感じに書けそう: 配列のメソッドなど
   const buildAndCacheDOM = () => {
     for (let r = 0; r < 8; r++) {
       const tr = document.createElement('tr');
@@ -399,6 +416,14 @@ const createRenderer = ({ boardDataCon, turnCounter, historyCon, playerM }) => {
         renderUndoButton(currentTurn);
         renderRedoButton(currentTurn);
         restartButton.disabled = false;
+      }
+    },
+
+    enablePieceSelect(enable) {
+      if (enable) {
+        playerPieceSelectField.disabled = false;
+      } else {
+        playerPieceSelectField.disabled = true;
       }
     }
   };
@@ -531,12 +556,15 @@ const createMoveRules = (boardDataCon) => {
 };
 
 // ----- BOT -----
-// Strategy Pattern をもちいて書き換え
+// Strategy Pattern
 
 /**
  * @typedef {'random' | 'greedy' | 'focusOnCorner'} StrategyType
  */
 
+/**
+ * BOT の思考ルーチン (Strategy) をまとめたオブジェクト
+ */
 const strategies = {
   random: (/** @type {MovesAndFlips} */ movesAndFlips) => {
     const randomInt = Math.trunc(Math.random() * movesAndFlips.length);
@@ -544,17 +572,17 @@ const strategies = {
   },
 
   greedy: (/** @type {MovesAndFlips} */ movesAndFlips) => {
-    return movesAndFlips.reduce((pre, cur) => {
-      const preFlipsAmount = pre.flipCandidates.length;
-      const curFlipsAmount = cur.flipCandidates.length;
+    const maxFlipMove = movesAndFlips.reduce((pre, cur) =>
+      pre.flipCandidates.length > cur.flipCandidates.length ? pre : cur
+    );
 
-      // 既存の値の方が大きければ維持
-      if (preFlipsAmount > curFlipsAmount) return pre;
-      // 現在の値の方が大きければ更新
-      if (preFlipsAmount < curFlipsAmount) return cur;
+    const maxFlipMoveList = movesAndFlips.filter(
+      (move) => move.flipCandidates.length === maxFlipMove.flipCandidates.length
+    );
 
-      return Math.random() < 0.5 ? pre : cur;
-    });
+    if (maxFlipMoveList.length === 1) return maxFlipMove;
+
+    return strategies.random(maxFlipMoveList);
   },
 
   focusOnCorner: (/** @type {MovesAndFlips} */ movesAndFlips) => {
@@ -566,8 +594,8 @@ const strategies = {
     ];
 
     /** @type {MovesAndFlips} */
-    const cornerMoves = movesAndFlips.filter((m) =>
-      corners.some((corner) => corner.r === m.coordinate.r && corner.c === m.coordinate.c)
+    const cornerMoves = movesAndFlips.filter((move) =>
+      corners.some((corner) => corner.r === move.coordinate.r && corner.c === move.coordinate.c)
     );
 
     if (cornerMoves.length === 0) return strategies.greedy(movesAndFlips);
@@ -591,7 +619,12 @@ const isStrategy = (str) => Object.hasOwn(strategies, str);
  * }} Bot
  */
 /**
- * Bot の思考ルーチン
+ * Bot の Context (の生成): 設定された Strategy にアルゴリズムの中身を移譲
+ * 依存: moveRules
+ * 責務:
+ * 1. BOT の石が黒か白かという情報の保持、ゲッターとセッター
+ * 2. BOT がとる戦略の名前の保持 (戦略の中身は知らない) 、セッター
+ * 3. 合法手と裏返る石の配列を受け取って、戦略に応じてどこに石を置くか (どの石が裏返るか) を返すメソッド
  * @param {MoveRules} moveRules
  * @param {object} options
  * @param {Piece | null} [options.piece]
@@ -601,9 +634,8 @@ const isStrategy = (str) => Object.hasOwn(strategies, str);
 const createBot = (moveRules, { piece = 'white', strategyType = 'focusOnCorner' } = {}) => {
   /** @type {Piece | null} */
   let botPiece = piece;
-  // 設定から石を決定する処理をのちほど追加
+
   let strategy = strategyType;
-  // TODO: DOM から strategyType を選べるようにする
 
   const move = () => {
     if (botPiece === null) return null;
@@ -618,7 +650,7 @@ const createBot = (moveRules, { piece = 'white', strategyType = 'focusOnCorner' 
 
     return strategies[strategy](movesAndFlips);
     // 石を置くセルの座標とそれによって裏返せる石の配列を返す
-    // -> handleCellClick (must be renamed) に渡す
+    // -> handleMove に渡す
   };
 
   return {
@@ -637,9 +669,7 @@ const createBot = (moveRules, { piece = 'white', strategyType = 'focusOnCorner' 
       if (isStrategy(botMode)) strategy = botMode;
     },
 
-    get strategy() {
-      return strategy;
-    },
+    // get strategy() {return strategy;},
 
     move
   };
@@ -687,7 +717,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
   };
 
   /**
-   * UIイベント用ラッパー関数（デコレーター）
+   * UI イベント用ラッパー関数（デコレーター）
    * インタラクティブモード時のみ関数を実行する
    * @param {(...args: any) => any} func - 実行したい関数
    * @returns {(...args: any) => any} - ガード付き関数
@@ -899,8 +929,8 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
    * プレイヤーが一手目を指したときにチェックされていたラジオボタンから BOT の設定をおこなうイベントリスナー
    */
   const setBotConfiguration = () => {
+    // #mode-select > radioButton:checked の value から bot の設定を取得 -> MVC に違反
     const checkedBotModeRadio = document.querySelector('input[name="bot-mode"]:checked');
-
     if (checkedBotModeRadio === null || checkedBotModeRadio instanceof HTMLInputElement === false) {
       console.log('Error: Not found checked radio button for mode.');
       return;
@@ -919,10 +949,40 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
     }
 
     bot.strategy = botMode;
-    // test
-    bot.piece = 'white';
+
+    // #player-piece-select から bot.piece を設定する -> MVC に違反
+    const checkedPlayerPieceRdio = document.querySelector('input[name="player-piece"]:checked');
+    if (checkedPlayerPieceRdio === null || checkedPlayerPieceRdio instanceof HTMLInputElement === false) {
+      console.log('Error: Not found checked radio button for player piece');
+      return;
+    }
+
+    bot.piece = checkedPlayerPieceRdio.value === 'black' ? 'white' : 'black';
+    // bot.piece === 'black' のときに、BOT に一手目を指させる UI が必要
 
     isBotConfigurated = true;
+  };
+
+  /**
+   * fieldset#mode-select がクリックされた際に、fieldset#player-piece-select の disabled 属性を切り替えるイベントリスナー
+   */
+  const onModeSelect = () => {
+    if (isBotConfigurated) return;
+
+    // #mode-select > radioButton:checked の value から bot の設定を取得 -> MVC に違反
+    const checkedBotModeRadio = document.querySelector('input[name="bot-mode"]:checked');
+    if (checkedBotModeRadio === null || checkedBotModeRadio instanceof HTMLInputElement === false) {
+      console.log('Error: Not found checked radio button for mode.');
+      return;
+    }
+
+    const botMode = checkedBotModeRadio.value;
+
+    if (botMode === 'human') {
+      renderer.enablePieceSelect(false);
+    } else {
+      renderer.enablePieceSelect(true);
+    }
   };
 
   const initGame = () => {
@@ -958,7 +1018,13 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       const undoButton = document.getElementById('undo-button');
       const redoButton = document.getElementById('redo-button');
       if (undoButton === null || redoButton === null) {
-        console.log('Error: Not found undo or redo button on setting up event listener');
+        console.log('Error: Not found undo or redo button on setting up event listeners');
+        return;
+      }
+
+      const modeSelectField = document.getElementById('mode-select');
+      if (modeSelectField === null) {
+        console.log('Error: Not found fieldset[id="mode-select"] on setting up event listeners.');
         return;
       }
 
@@ -988,6 +1054,7 @@ const createOthelloController = ({ boardDataCon, historyCon, turnCounter, render
       restartButton.addEventListener('click', runIfInteractive(initGame));
       undoButton.addEventListener('click', runIfInteractive(onUndo));
       redoButton.addEventListener('click', runIfInteractive(onRedo));
+      modeSelectField.addEventListener('click', onModeSelect);
     }
   };
 };
